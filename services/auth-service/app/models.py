@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
 	Boolean,
@@ -18,6 +18,10 @@ from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+
+def utc_now() -> datetime:
+	"""Retorna fecha/hora actual en UTC con timezone-aware."""
+	return datetime.now(timezone.utc)
 
 
 class Credencial(Base):
@@ -88,15 +92,15 @@ class Credencial(Base):
 	creado_en: Mapped[datetime] = mapped_column(
 		TIMESTAMP,
 		nullable=False,
-		default=datetime.utcnow,
+		default=utc_now,
 	)
 
 	# Fecha/hora de ultima actualizacion del registro.
 	actualizado_en: Mapped[datetime] = mapped_column(
 		TIMESTAMP,
 		nullable=False,
-		default=datetime.utcnow,
-		onupdate=datetime.utcnow,
+		default=utc_now,
+		onupdate=utc_now,
 	)
 
 class TokenRecuperacion(Base):
@@ -142,7 +146,7 @@ class TokenRecuperacion(Base):
 	creado_en: Mapped[datetime] = mapped_column(
 		TIMESTAMP,
 		nullable=False,
-		default=datetime.utcnow,
+		default=utc_now,
 	)
 
 
@@ -189,7 +193,7 @@ class Registro2FA(Base):
 	creado_en: Mapped[datetime] = mapped_column(
 		TIMESTAMP,
 		nullable=False,
-		default=datetime.utcnow,
+		default=utc_now,
 	)
 
 
@@ -232,7 +236,7 @@ class LogAutenticacion(Base):
 	creado_en: Mapped[datetime] = mapped_column(
 		TIMESTAMP,
 		nullable=False,
-		default=datetime.utcnow,
+		default=utc_now,
 	)
 
 @event.listens_for(Credencial, "before_insert")
