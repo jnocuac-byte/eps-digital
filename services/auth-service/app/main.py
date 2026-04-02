@@ -27,6 +27,7 @@ from app.schemas import (
 	Enable2FARequest,
 	LoginResponse,
 	MessageResponse,
+	RegisterResponse,
 	RecoverRequest,
 	RefreshTokenRequest,
 	ResetPasswordRequest,
@@ -78,7 +79,7 @@ def _get_credencial_id_from_access_token(token: str) -> UUID:
 
 @app.post(
 	"/auth/register",
-	response_model=MessageResponse,
+	response_model=RegisterResponse,
 	tags=["auth"],
 	responses={
 		200: {

@@ -1,5 +1,4 @@
 """Esquemas Pydantic para validacion de entradas y salidas del Auth Service."""
-
 from datetime import date
 import re
 from uuid import UUID
@@ -86,7 +85,6 @@ class UserRegister(BaseModel):
 		if value is not True:
 			raise ValueError("Debe aceptar terminos y condiciones")
 		return value
-
 
 class UserLogin(BaseModel):
 	"""Schema de entrada para autenticacion de usuario."""
@@ -246,6 +244,20 @@ class MessageResponse(BaseModel):
 			}
 		}
 	}
+
+class RegisterResponse(MessageResponse):
+    """Respuesta específica para el registro que incluye el ID del usuario."""
+    usuario_id: str
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "message": "Usuario registrado correctamente",
+                "success": True,
+                "usuario_id": "550e8400-e29b-41d4-a716-446655440000"
+            }
+        }
+    }
 
 
 class ErrorResponse(BaseModel):
