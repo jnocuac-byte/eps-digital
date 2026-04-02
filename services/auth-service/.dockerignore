@@ -1,0 +1,45 @@
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Base de datos local (no copiar al contenedor)
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos de entorno
+.env
+.env.local
+.env.*.local
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archivos de Alembic (opcional, se ejecutan en el contenedor)
+alembic/versions/*.pyc
+
+# Archivos de prueba
+tests/
+.pytest_cache/
+.coverage
+
+# Archivos de git
+.git/
+.gitignore
+
+# Documentación
+README.md
+LICENSE
+
+# Logs
+*.log
