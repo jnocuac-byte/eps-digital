@@ -11,6 +11,8 @@ from .consumer import configurar_rabbitmq, start_background_consumer
 from .email_client import configurar_sendgrid, enviar_correo
 from .templates import bienvenida
 
+from fastapi.middleware.cors import CORSMiddleware
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Notifications Service", version="1.0.0", lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev
+        "http://localhost:3000",      # React alternativo
+        "https://eps-digital.onrender.com",  # Frontend en Render
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 def health() -> Dict[str, str]:

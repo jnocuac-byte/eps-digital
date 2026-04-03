@@ -31,6 +31,8 @@ from app.schemas import (
 	UsuarioCompletoResponse,
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -43,6 +45,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev
+        "http://localhost:3000",      # React alternativo
+        "https://eps-digital.onrender.com",  # Frontend en Render
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class MessageResponse(BaseModel):
 	"""Respuesta simple para operaciones de confirmacion."""

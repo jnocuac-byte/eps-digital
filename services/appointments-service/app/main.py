@@ -36,6 +36,8 @@ from app.schemas import (
 	ReprogramarCitaRequest,
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+
 
 class MessageResponse(BaseModel):
 	"""Respuesta simple para operaciones sin payload complejo."""
@@ -58,6 +60,17 @@ app = FastAPI(
 	lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev
+        "http://localhost:3000",      # React alternativo
+        "https://eps-digital.onrender.com",  # Frontend en Render
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def _parse_user_id_header(x_user_id: str | None) -> UUID:
 	"""Convierte el header X-User-ID a UUID y valida su presencia."""

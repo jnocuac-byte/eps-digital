@@ -8,6 +8,8 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from fastapi.middleware.cors import CORSMiddleware
+
 try:
 	crud = import_module("app.crud")
 	_database = import_module("app.database")
@@ -56,6 +58,17 @@ app = FastAPI(
 	lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev
+        "http://localhost:3000",      # React alternativo
+        "https://eps-digital.onrender.com",  # Frontend en Render
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # SERVICIOS
 @app.post(

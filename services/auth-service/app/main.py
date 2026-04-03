@@ -9,6 +9,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.auth import (
 	DocumentoNoEncontradoError,
 	UserServiceUnavailableError,
@@ -54,6 +56,18 @@ app = FastAPI(
 	version="1.0.0",
 	description="Servicio de autenticacion y gestion de sesiones.",
 	lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev
+        "http://localhost:3000",      # React alternativo
+        "https://eps-digital.onrender.com",  # Frontend en Render
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 security = HTTPBearer(auto_error=False)

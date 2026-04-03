@@ -29,6 +29,7 @@ from .schemas import (
 	MensajeResponse,
 )
 
+from fastapi.middleware.cors import CORSMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,6 +55,18 @@ app = FastAPI(
 	description="Servicio de chat y clasificacion de sintomas para EPS.",
 	version="1.0.0",
 	lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev
+        "http://localhost:3000",      # React alternativo
+        "https://eps-digital.onrender.com",  # Frontend en Render
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
