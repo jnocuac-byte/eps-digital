@@ -62,6 +62,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",      # Vite dev
         "http://localhost:3000",      # React alternativo
+		"http://127.0.0.1:5173",
         "https://eps-digital.onrender.com",  # Frontend en Render
     ],
     allow_credentials=True,
