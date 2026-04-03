@@ -72,17 +72,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Notifications Service", version="1.0.0", lifespan=lifespan)
 
 origins = [
-    "https://eps-digital-cn2h.onrender.com",  # URL Render del frontend
-    "http://localhost:5173",                # Probando en local con Vite
+    "https://eps-digital-cn2h.onrender.com",
+    "https://eps-digital-cn2h.onrender.com/",  # Con slash también por si acaso
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5173/",
+    "http://127.0.0.1:5173/",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, 
+    allow_origins=origins,
+    allow_origin_regex="https://.*\.onrender\.com",  # Permite cualquier subdominio de onrender
     allow_credentials=True,
-    allow_methods=["*"], # Permite GET, POST, OPTIONS, etc.
-    allow_headers=["*"], # Permite todos los headers (Authorization, Content-Type, etc.)
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 @app.get("/health")
