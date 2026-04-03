@@ -6,7 +6,7 @@ from importlib import import_module
 from uuid import UUID
 
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from fastapi.middleware.cors import CORSMiddleware
