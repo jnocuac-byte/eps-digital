@@ -75,6 +75,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
+	max_age=600,
 )
 
 # SERVICIOS
