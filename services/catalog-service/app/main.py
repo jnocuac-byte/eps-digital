@@ -5,6 +5,8 @@ from datetime import date, time
 from importlib import import_module
 from uuid import UUID
 
+from requests import Request, Response
+
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -77,6 +79,16 @@ app.add_middleware(
     expose_headers=["*"],
 	max_age=600,
 )
+
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(request: Request) -> Response:
+    response = Response()
+    response.headers["Access-Control-Allow-Origin"] = "https://eps-digital-cn2h.onrender.com"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Max-Age"] = "600"
+    return response
 
 # SERVICIOS
 @app.post(
