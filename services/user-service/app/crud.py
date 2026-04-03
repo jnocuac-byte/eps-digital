@@ -20,6 +20,19 @@ def get_user_by_documento(db: Session, numero_documento: str) -> Usuario | None:
 	return db.scalar(stmt)
 
 
+def get_user_by_tipo_y_numero_documento(
+	db: Session,
+	tipo_documento: str,
+	numero_documento: str,
+) -> Usuario | None:
+	"""Obtiene un usuario por tipo y numero de documento."""
+	stmt = select(Usuario).where(
+		Usuario.tipo_documento == tipo_documento.strip().upper(),
+		Usuario.numero_documento == numero_documento.strip(),
+	)
+	return db.scalar(stmt)
+
+
 def get_user_by_correo(db: Session, correo: str) -> Usuario | None:
 	"""Obtiene un usuario por correo electronico."""
 	stmt = select(Usuario).where(Usuario.correo == correo)

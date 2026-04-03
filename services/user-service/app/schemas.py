@@ -140,6 +140,27 @@ class UserResponse(UserBase):
 	}
 
 
+class UserLookupResponse(BaseModel):
+	"""Respuesta resumida para busquedas de usuario por documento."""
+
+	usuario_id: UUID
+	correo: EmailStr
+	nombres: str
+	apellidos: str
+
+	model_config = {
+		"from_attributes": True,
+		"json_schema_extra": {
+			"example": {
+				"usuario_id": "8b4dd5d0-90ec-4a05-bf31-4cf6fd9f5347",
+				"correo": "juan.perez@correo.com",
+				"nombres": "Juan",
+				"apellidos": "Perez",
+			}
+		}
+	}
+
+
 class MedicalInfoBase(BaseModel):
 	"""Campos base de informacion medica del usuario."""
 

@@ -2,7 +2,7 @@ from uuid import UUID
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.crud import (
 	delete_user,
 	get_afiliacion,
 	get_medical_info,
+	get_user_by_tipo_y_numero_documento,
 	get_user_by_id,
 	update_afiliacion_estado,
 	update_user,
@@ -24,6 +25,7 @@ from app.schemas import (
 	MedicalInfoCreate,
 	MedicalInfoResponse,
 	UserCreate,
+	UserLookupResponse,
 	UserResponse,
 	UserUpdate,
 	UsuarioCompletoResponse,
@@ -78,6 +80,33 @@ def create_user_endpoint(user_data: UserCreate, db: Session = Depends(get_db)) -
 		return create_user(db, user_data)
 	except ValueError as exc:
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.get(
+	"/usuarios/buscar",
+	response_model=UserLookupResponse,
+	tags=["usuarios"],
+	responses={404: {"description": "Usuario no encontrado para el documento"}},
+)
+def buscar_usuario_por_documento_endpoint(
+	tipo_documento: str = Query(..., min_length=2, max_length=5),
+	numero_documento: str = Query(..., min_length=5, max_length=20),
+	db: Session = Depends(get_db),
+) -> UserLookupResponse:
+	"""Busca un usuario por tipo y numero de documento."""
+	usuario = get_user_by_tipo_y_numero_documento(db, tipo_documento, numero_documento)
+	if not usuario:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail="Usuario no encontrado para el documento enviado",
+		)
+
+	return UserLookupResponse(
+		usuario_id=usuario.usuario_id,
+		correo=usuario.correo,
+		nombres=usuario.nombres,
+		apellidos=usuario.apellidos,
+	)
 
 
 @app.get(

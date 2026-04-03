@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta, UTC
 
 import bcrypt
+import httpx
 from jose import ExpiredSignatureError, JWTError, jwt
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -27,6 +28,15 @@ RECOVERY_TOKEN_EXPIRE_MINUTES = 30
 TWO_FA_CODE_EXPIRE_MINUTES = 10
 MAX_INTENTOS_FALLIDOS = 5
 BLOQUEO_MINUTES = 15
+USER_SERVICE_TIMEOUT_SECONDS = 5.0
+
+
+class DocumentoNoEncontradoError(ValueError):
+	"""Error de dominio para documento no encontrado en User Service."""
+
+
+class UserServiceUnavailableError(ValueError):
+	"""Error para caidas, timeout o respuestas invalidas de User Service."""
 
 
 def _get_jwt_secret_key() -> str:
@@ -35,6 +45,14 @@ def _get_jwt_secret_key() -> str:
 	if not secret:
 		raise ValueError("JWT_SECRET_KEY no esta configurada en el entorno")
 	return secret
+
+
+def _get_user_service_url() -> str:
+	"""Obtiene URL base de User Service desde variable de entorno."""
+	base_url = os.getenv("USER_SERVICE_URL")
+	if not base_url:
+		raise UserServiceUnavailableError("USER_SERVICE_URL no esta configurada")
+	return base_url.rstrip("/")
 
 
 # 2. Funciones de hashing y verificacion
@@ -141,6 +159,53 @@ def get_credencial_by_correo(db: Session, correo: str) -> Credencial | None:
 	"""Obtiene credencial por correo (normalizado en minusculas)."""
 	stmt = select(Credencial).where(Credencial.correo == correo.lower().strip())
 	return db.execute(stmt).scalars().first()
+
+
+def get_correo_by_documento(
+	db: Session,
+	tipo_documento: str,
+	numero_documento: str,
+) -> str:
+	"""Consulta User Service por documento y retorna el correo asociado."""
+	# La firma conserva db para mantener coherencia con funciones de negocio del servicio.
+	_ = db
+
+	params = {
+		"tipo_documento": tipo_documento.strip().upper(),
+		"numero_documento": numero_documento.strip(),
+	}
+	url = f"{_get_user_service_url()}/usuarios/buscar"
+
+	try:
+		response = httpx.get(url, params=params, timeout=USER_SERVICE_TIMEOUT_SECONDS)
+	except httpx.TimeoutException as exc:
+		raise UserServiceUnavailableError(
+			"User Service no responde (timeout al consultar documento)",
+		) from exc
+	except httpx.RequestError as exc:
+		raise UserServiceUnavailableError(
+			"No se pudo conectar con User Service",
+		) from exc
+
+	if response.status_code == 404:
+		raise DocumentoNoEncontradoError("Documento no encontrado")
+
+	if response.status_code >= 500:
+		raise UserServiceUnavailableError("User Service no disponible")
+
+	if response.status_code != 200:
+		raise ValueError("No fue posible validar el documento en User Service")
+
+	try:
+		payload = response.json()
+	except ValueError as exc:
+		raise UserServiceUnavailableError("Respuesta invalida de User Service") from exc
+
+	correo = payload.get("correo")
+	if not isinstance(correo, str) or not correo.strip():
+		raise UserServiceUnavailableError("User Service no retorno un correo valido")
+
+	return correo.lower().strip()
 
 
 def verificar_bloqueo(credencial: Credencial) -> bool:

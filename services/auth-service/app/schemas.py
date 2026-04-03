@@ -104,6 +104,36 @@ class UserLogin(BaseModel):
 	}
 
 
+class UserLoginDocumento(BaseModel):
+	"""Schema de entrada para autenticacion con documento y contrasena."""
+
+	# Tipo de documento permitido: CC, CE, PA o TI.
+	tipo_documento: str = Field(...)
+	# Numero de documento de identidad.
+	numero_documento: str = Field(..., min_length=5, max_length=20)
+	# Contrasena del usuario.
+	password: str
+
+	model_config = {
+		"json_schema_extra": {
+			"example": {
+				"tipo_documento": "CC",
+				"numero_documento": "1020304050",
+				"password": "ClaveSegura1",
+			}
+		}
+	}
+
+	@field_validator("tipo_documento")
+	@classmethod
+	def validar_tipo_documento(cls, value: str) -> str:
+		"""Valida que el tipo de documento este dentro de las opciones permitidas."""
+		tipo_documento = value.strip().upper()
+		if tipo_documento not in TIPOS_DOCUMENTO_VALIDOS:
+			raise ValueError("tipo_documento debe ser uno de: CC, CE, PA, TI")
+		return tipo_documento
+
+
 class TokenResponse(BaseModel):
 	"""Respuesta basica con tokens de autenticacion."""
 

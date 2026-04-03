@@ -10,10 +10,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.auth import (
+	DocumentoNoEncontradoError,
+	UserServiceUnavailableError,
 	autenticar_usuario,
 	configurar_2fa,
 	crear_token_recuperacion,
 	generar_tokens_para_credencial,
+	get_correo_by_documento,
 	get_credencial_by_correo,
 	get_credencial_by_id,
 	refresh_access_token,
@@ -33,6 +36,7 @@ from app.schemas import (
 	ResetPasswordRequest,
 	TokenResponse,
 	UserLogin,
+	UserLoginDocumento,
 	UserRegister,
 	Verify2FARequest,
 )
@@ -168,6 +172,95 @@ def login(
 
 	if tiene_2fa:
 		# LoginResponse exige strings; se devuelven vacios cuando 2FA aun no finaliza.
+		return LoginResponse(
+			access_token="",
+			refresh_token="",
+			token_type="bearer",
+			usuario_id=credencial.usuario_id,
+			requiere_2fa=True,
+		)
+
+	access_token, refresh_token = generar_tokens_para_credencial(credencial_id)
+	return LoginResponse(
+		access_token=access_token,
+		refresh_token=refresh_token,
+		token_type="bearer",
+		usuario_id=credencial.usuario_id,
+		requiere_2fa=False,
+	)
+
+
+@app.post(
+	"/auth/login/documento",
+	response_model=LoginResponse,
+	tags=["auth"],
+	responses={
+		200: {
+			"description": "Resultado de autenticacion por documento",
+			"content": {
+				"application/json": {
+					"example": {
+						"access_token": "",
+						"refresh_token": "",
+						"token_type": "bearer",
+						"usuario_id": "550e8400-e29b-41d4-a716-446655440000",
+						"requiere_2fa": True,
+					}
+				}
+			},
+		},
+		401: {
+			"description": "Credenciales invalidas o cuenta bloqueada",
+			"content": {"application/json": {"example": {"detail": "Credenciales invalidas"}}},
+		},
+		503: {
+			"description": "User Service no disponible",
+			"content": {
+				"application/json": {
+					"example": {
+						"detail": "No fue posible validar el documento en este momento"
+					}
+				}
+			},
+		},
+	},
+)
+def login_documento(
+	payload: UserLoginDocumento,
+	request: Request,
+	db: Session = Depends(get_db),
+) -> LoginResponse:
+	try:
+		correo = get_correo_by_documento(db, payload.tipo_documento, payload.numero_documento)
+	except DocumentoNoEncontradoError:
+		raise HTTPException(
+			status_code=status.HTTP_401_UNAUTHORIZED,
+			detail="Credenciales invalidas",
+		)
+	except UserServiceUnavailableError as exc:
+		raise HTTPException(
+			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+			detail="No fue posible validar el documento en este momento",
+		) from exc
+	except ValueError as exc:
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+	try:
+		credencial_id, tiene_2fa = autenticar_usuario(
+			db,
+			correo,
+			payload.password,
+			ip=request.client.host if request.client else None,
+			user_agent=request.headers.get("user-agent"),
+		)
+	except ValueError as exc:
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+	credencial = get_credencial_by_id(db, credencial_id)
+	if not credencial:
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credencial no valida")
+
+	if tiene_2fa:
 		return LoginResponse(
 			access_token="",
 			refresh_token="",
