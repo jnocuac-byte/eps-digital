@@ -1,0 +1,38 @@
+services:
+  ainlp-db:
+    image: postgres:15-alpine
+    container_name: ainlp-db
+    environment:
+      POSTGRES_USER: eps_user
+      POSTGRES_PASSWORD: eps_password
+      POSTGRES_DB: eps_ainlp
+    ports:
+      - "5436:5432"
+    volumes:
+      - ainlp-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eps_user -d eps_ainlp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ainlp-service:
+    build: .
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8005"
+    container_name: ainlp-service
+    ports:
+      - "8005:8005"
+    environment:
+      DATABASE_URL: postgresql://eps_user:eps_password@ainlp-db:5432/eps_ainlp
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      ainlp-db:
+        condition: service_healthy
+    volumes:
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+
+volumes:
+  ainlp-db-data:
