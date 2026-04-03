@@ -61,7 +61,7 @@ app = FastAPI(
 
 origins = [
     "https://eps-digital-cn2h.onrender.com",
-    "https://eps-digital-cn2h.onrender.com/",  # Con slash también por si acaso
+    "https://eps-digital-cn2h.onrender.com/",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:5173/",
@@ -71,23 +71,12 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"https://.*\.onrender\.com",  # Permite cualquier subdominio de onrender
+    allow_origin_regex=r"https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 	max_age=600,
 )
-
-@app.options("/{rest_of_path:path}")
-async def preflight_handler(request: Request) -> Response:
-    response = Response()
-    response.headers["Access-Control-Allow-Origin"] = "https://eps-digital-cn2h.onrender.com"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Max-Age"] = "600"
-    return response
 
 # SERVICIOS
 @app.post(
