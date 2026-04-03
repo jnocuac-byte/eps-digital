@@ -1,0 +1,28 @@
+COLORES (del prototipo existente)
+- Primario: #2B3E59 (azul marino profundo) - navbar, botones principales
+- Fondo principal: #FFFFFF (blanco)
+- Texto navbar: #FFFFFF
+- Fondo tarjetas: #F5F5F5 (gris muy claro)
+- Texto principal: #333333 (gris oscuro)
+- Texto secundario: #666666 (gris medio)
+- Bordes: #E5E7EB
+
+TIPOGRAFÍA (Google Fonts)
+- Inter (títulos, navbar): Bold 24px, Medium 16px, SemiBold 22px
+- Roboto (textos, botones): Regular 14px, Medium 14px
+
+ESTILOS GENERALES
+- Bordes redondeados: 12px en tarjetas, 8px en botones
+- Sombras suaves en tarjetas (elevación)
+- Navbar fija superior, fondo sólido
+- Footer con información de contacto y legal
+
+COMPONENTES UI (shadcn/ui)
+- Button (variantes: default, outline, destructive)
+- Card (para servicios, citas)
+- Input (con etiqueta flotante o arriba)
+- Select (tipo_documento, especialidades)
+- Calendar (para fechas)
+- Tabs (para submenús de Citas Médicas)
+- Dialog (para confirmar cancelaciones)
+- Toast (notificaciones)

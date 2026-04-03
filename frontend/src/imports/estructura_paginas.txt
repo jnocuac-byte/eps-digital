@@ -1,0 +1,146 @@
+=== REGISTRO (2 pasos) ===
+Paso 1:
+- Tipo de documento (select: CC, CE, PA, TI)
+- Número de documento
+- Nombres
+- Apellidos
+- Fecha de nacimiento
+- Checkbox: Acepto términos y condiciones
+- Botón "Siguiente"
+
+Paso 2:
+- Teléfono/Celular
+- Correo electrónico
+- Contraseña (con visibilidad toggle)
+- Confirmar contraseña
+- Botón "Registrarme"
+- Enlace "¿Ya tienes cuenta? Inicia sesión"
+
+=== INICIAR SESIÓN ===
+- Tipo de documento (select: CC, CE, PA, TI)
+- Número de documento
+- Contraseña (con visibilidad toggle)
+- Enlace "¿Olvidaste tu contraseña?"
+- Botón "Ingresar"
+- Enlace "Crear cuenta"
+
+=== INICIO ===
+Sección Hero:
+- Título: "Agenda tu cita médica de forma rápida y sencilla"
+- Subtítulo: "Inteligencia Artificial al servicio de tu salud"
+- Botones: "Agendar Cita" → /citas/agendar, "Conoce más" → /servicios
+
+Beneficios (3 tarjetas):
+- "Agenda 24/7": Reserva y gestiona tus citas a cualquier hora
+- "Asistente con IA": Obtén respuestas rápidas y orientación personalizada
+- "Cerca de ti": Encuentra especialistas y centros cercanos
+
+Usuario autenticado (mostrar):
+- "Bienvenido, {nombres}"
+- "Documento registrado: {numero_documento}"
+- "Estado: Activo"
+- Botones: "Ir a mi perfil", "Ver mis citas"
+
+Última cita registrada:
+- Si tiene citas: mostrar resumen de la próxima cita
+- Si no: "Aún no tienes citas guardadas. Puedes agendar una desde el menú principal"
+
+Acceso rápido al chatbot (botón flotante o sección)
+
+=== MI PERFIL ===
+Mostrar:
+- Nombre completo
+- Número de afiliado (usuario_id)
+- Tipo de afiliación
+- Documento (tipo + número)
+- Fecha de nacimiento
+- Teléfono
+- Correo
+- Tipo de sangre
+- Alergias
+- Enfermedades crónicas
+- Médico asignado
+- Número de póliza
+- Fecha de afiliación
+- Estado
+Botón "Editar perfil" (abre modal con campos editables)
+Botón "Volver al inicio"
+
+=== CITAS MÉDICAS ===
+Tabs o submenús:
+1. Agendar nueva cita
+2. Ver citas programadas
+3. Cancelar/Reprogramar
+4. Historial de citas
+
+AGENDAR NUEVA CITA:
+- Tipo de servicio (select)
+- Especialidad (select, depende del servicio)
+- Médico de preferencia (select)
+- Fecha preferida (calendario)
+- Hora preferida (select)
+- Descripción de síntomas (textarea)
+- Resumen de cita (actualiza en vivo)
+- Botón "Confirmar cita"
+- Botón "Volver al inicio"
+
+VER CITAS PROGRAMADAS:
+- Listado de citas activas con: fecha, hora, especialidad, médico, sede, estado
+- Botones por cita: "Cancelar", "Reprogramar"
+- Botones globales: "Agendar nueva cita", "Historial", "Volver al inicio"
+
+CANCELAR/REPROGRAMAR:
+- Selector de cita a modificar
+- Formulario de reprogramación (fecha, hora)
+- Confirmación de cancelación
+
+HISTORIAL DE CITAS:
+- Listado de citas pasadas con estado (atendida, cancelada, no asistió)
+- Filtros por fecha y estado
+
+=== ASISTENTE VIRTUAL ===
+Panel izquierdo:
+- Avatar y nombre del asistente "EPSIA"
+- Accesos rápidos:
+  - "Agendar cita" → redirige a /citas/agendar
+  - "Ver mis citas" → redirige a /citas
+  - "Información general" → redirige a /ayuda
+
+Panel derecho:
+- Historial de conversación (burbujas usuario/asistente)
+- Input de texto para enviar mensaje
+- Botón de enviar
+
+=== SERVICIOS ===
+- Barra de búsqueda (buscar servicio o especialidad)
+- Grid de tarjetas con:
+  - Icono
+  - Nombre del servicio (ej: Medicina General, Cardiología, Pediatría, Odontología)
+  - Descripción breve
+  - Indicador "Disponible" o "No disponible"
+  - Botón "Agendar" (si está disponible) → redirige a /citas/agendar con servicio preseleccionado
+
+=== AYUDA ===
+4 secciones:
+1. Guía de uso: instrucciones paso a paso
+2. Preguntas frecuentes:
+   - ¿Cómo agendar una cita?
+   - ¿Necesito registrarme?
+   - ¿Qué significa el asterisco (*)?
+   - ¿Cómo cancelar una cita?
+   - ¿Qué hago si olvido mi contraseña?
+3. Contacto y soporte:
+   - Andrés Ramos: andres.ramos@epsdigital.com
+   - Juan Esteban Nocua: juan.nocua@epsdigital.com
+   - Santiago Pardo: santiago.pardo@epsdigital.com
+4. Información legal:
+   - Prototipo funcional para demostración académica
+   - Universidad Central - Práctica de Ingeniería III
+   - Ley 1581 de 2012 (protección de datos)
+   - Datos simulados, no almacenamiento real de información sensible
+
+=== FOOTER (todas las páginas) ===
+- Logo EPS Digital
+- Enlaces rápidos (Inicio, Servicios, Ayuda)
+- Contacto: correo@epsdigital.com
+- Año 2026

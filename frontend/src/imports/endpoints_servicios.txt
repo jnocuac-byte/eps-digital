@@ -1,0 +1,54 @@
+# AUTH SERVICE
+POST /auth/register
+Body: { nombres, apellidos, tipo_documento, numero_documento, fecha_nacimiento, correo, telefono, password, confirm_password, acepta_terminos }
+Response: { message, success, usuario_id }
+
+POST /auth/login/documento
+Body: { tipo_documento, numero_documento, password }
+Response: { access_token, refresh_token, token_type, usuario_id, requiere_2fa }
+
+GET /auth/me
+Headers: Authorization: Bearer {token}
+Response: { credencial_id, correo, rol, activo, tiene_2fa }
+
+# USER SERVICE
+POST /usuarios
+Body: { usuario_id, nombres, apellidos, tipo_documento, numero_documento, fecha_nacimiento, correo, telefono }
+Response: { usuario_id, nombres, apellidos, tipo_documento, numero_documento, fecha_nacimiento, correo, telefono, creado_en, actualizado_en }
+
+GET /usuarios/{usuario_id}
+Response: mismo que POST
+
+PUT /usuarios/{usuario_id}
+Body: campos a actualizar (todos opcionales)
+Response: usuario actualizado
+
+GET /usuarios/{usuario_id}/completo
+Response: { user, informacion_medica, afiliacion }
+
+# CITAS SERVICE
+POST /citas
+Body: { usuario_id, medico_id, especialidad_id, tipo_servicio, fecha_cita, hora_inicio, hora_fin, sede_id, descripcion_sintomas }
+Response: cita creada
+
+GET /citas/usuario/{usuario_id}
+Response: listado de citas del usuario
+
+PUT /citas/{cita_id}/cancelar
+Body: { motivo }
+Response: cita cancelada
+
+# CATÁLOGO SERVICE
+GET /servicios
+Response: listado de servicios
+
+GET /especialidades?servicio_id={id}
+Response: listado de especialidades
+
+GET /medicos?especialidad_id={id}
+Response: listado de médicos
+
+# AI/NLP SERVICE
+POST /chat
+Body: { mensaje, conversacion_id (opcional) }
+Response: { respuesta, conversacion_id, clasificacion }
