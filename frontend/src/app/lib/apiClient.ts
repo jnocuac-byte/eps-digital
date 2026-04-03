@@ -4,12 +4,12 @@ import { useAuthStore } from '../stores/authStore';
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 const BASE_URLS = {
-  auth: isLocal ? 'http://localhost:8001' : 'https://eps-auth-service.onrender.com',
+  auth: isLocal ? 'http://localhost:8001' : 'https://eps-digital.onrender.com',
   user: isLocal ? 'http://localhost:8002' : 'https://eps-user-service.onrender.com',
-  citas: isLocal ? 'http://localhost:8003' : 'https://eps-citas-service.onrender.com',
-  catalogo: isLocal ? 'http://localhost:8004' : 'https://eps-catalogo-service.onrender.com',
+  citas: isLocal ? 'http://localhost:8003' : 'https://eps-appointments-service.onrender.com',
+  catalogo: isLocal ? 'http://localhost:8004' : 'https://eps-catalog-service.onrender.com',
   ai: isLocal ? 'http://localhost:8005' : 'https://eps-ainlp-service.onrender.com',
-  notifications: isLocal ? 'http://localhost:8006' : 'https://eps-notifications-service.onrender.com',
+  notifications: isLocal ? 'http://localhost:8006' : 'https://eps-notification-service.onrender.com',
 };
 
 function createClient(baseURL: string, requiresAuth = false) {
