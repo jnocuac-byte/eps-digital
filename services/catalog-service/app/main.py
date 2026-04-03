@@ -5,9 +5,8 @@ from datetime import date, time
 from importlib import import_module
 from uuid import UUID
 
-from requests import Request, Response
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status, Request, Response
 from sqlalchemy.orm import Session
 
 from fastapi.middleware.cors import CORSMiddleware
