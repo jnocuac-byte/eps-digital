@@ -19,7 +19,7 @@ from app.crud import (
 	get_conversaciones_by_usuario,
 	get_mensajes_by_conversacion,
 )
-from .database import get_db
+from .database import get_db, Base, engine
 from .prompts import get_assistant_tools
 from .schemas import (
 	ChatRequest,
@@ -33,6 +33,11 @@ from .schemas import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 	"""Inicializa recursos globales del servicio al arrancar."""
+	try:
+		Base.metadata.create_all(bind=engine)
+	except Exception as exc:
+		raise RuntimeError(f"Error al inicializar la base de datos: ") from exc
+	
 	app.state.openai_ready = False
 	app.state.openai_error = ""
 	try:
