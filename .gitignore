@@ -14,8 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
@@ -77,6 +75,12 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# Ignorar solo las carpetas lib de Python (no las del frontend)
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/lib/python*/  
 
 # IPython
 profile_default/
@@ -247,3 +251,5 @@ Desktop.ini
 *.swo
 *.tmp
 *.temp
+
+!frontend/src/app/lib/
