@@ -73,13 +73,7 @@ app = FastAPI(title="Notifications Service", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",      # Vite dev
-        "http://localhost:3000",      # React alternativo
-		"http://127.0.0.1:5173",
-        "https://eps-digital.onrender.com",
-		"https://eps-digital-cn2h.onrender.com",  # Frontend en Render
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
