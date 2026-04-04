@@ -266,7 +266,7 @@ JWT_SECRET_KEY=tu_clave_secreta
 
 ```env
 DATABASE_URL=postgresql://eps_user:eps_password@ainlp-db:5432/eps_ainlp
-GROQ_API_KEY=tu_api_key_de_google
+GROQ_API_KEY=tu_api_key_de_groq
 JWT_SECRET_KEY=tu_clave_secreta
 ```
 
@@ -412,7 +412,7 @@ Este proyecto está bajo la licencia MIT. Consulta el archivo `LICENSE` para má
 - Universidad Central por el respaldo académico
 - GitHub Education por las herramientas gratuitas
 - Render por el plan gratuito de despliegue
-- OpenAI y Google por las APIs de IA
+- Groq por las APIs de IA
 
 ---
 
