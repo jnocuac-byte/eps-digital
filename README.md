@@ -392,7 +392,7 @@ eps-digital/
 |--------|-----|----------|
 | Juan Esteban Nocua | Desarrollador Backend & DevOps | jnocuac@ucentral.edu.co |
 | Andrés Ramos Ricaurte | Desarrollador Full Stack | aramosr@ucentral.edu.co |
-| Santiago Pardo | Desarrollador Frontend | spardoa@ucentral.edu.co |
+| Santiago Pardo | Desarrollador Frontend | spardoo@ucentral.edu.co |
 
 **Institución:** Universidad Central  
 **Asignatura:** Práctica de Ingeniería III  
