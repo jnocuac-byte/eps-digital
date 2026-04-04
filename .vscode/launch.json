@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Service: Debug current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}/services/${input:serviceFolder}",
+      "envFile": "${workspaceFolder}/services/${input:serviceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/services/${input:serviceFolder}"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "serviceFolder",
+      "type": "promptString",
+      "description": "Nombre de carpeta dentro de services (ej: auth-service)",
+      "default": "auth-service"
+    }
+  ]
+}

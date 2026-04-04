@@ -1,0 +1,37 @@
+services:
+  user-db:
+    image: postgres:15-alpine
+    container_name: user-db
+    environment:
+      POSTGRES_USER: eps_user
+      POSTGRES_PASSWORD: eps_password
+      POSTGRES_DB: eps_user
+    ports:
+      - "5433:5432"
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eps_user -d eps_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build: .
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002"
+    container_name: user-service
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql://eps_user:eps_password@user-db:5432/eps_user
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      user-db:
+        condition: service_healthy
+    volumes:
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+
+volumes:
+  user-db-data:

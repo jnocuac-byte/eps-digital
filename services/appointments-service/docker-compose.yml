@@ -1,0 +1,37 @@
+services:
+  citas-db:
+    image: postgres:15-alpine
+    container_name: citas-db
+    environment:
+      POSTGRES_USER: eps_user
+      POSTGRES_PASSWORD: eps_password
+      POSTGRES_DB: eps_citas
+    ports:
+      - "5434:5432"
+    volumes:
+      - citas-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eps_user -d eps_citas"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  citas-service:
+    build: .
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8003"
+    container_name: citas-service
+    ports:
+      - "8003:8003"
+    environment:
+      DATABASE_URL: postgresql://eps_user:eps_password@citas-db:5432/eps_citas
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-cambia_esta_clave_en_produccion}
+    depends_on:
+      citas-db:
+        condition: service_healthy
+    volumes:
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+
+volumes:
+  citas-db-data:

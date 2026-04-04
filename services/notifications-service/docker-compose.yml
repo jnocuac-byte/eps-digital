@@ -1,0 +1,35 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  notifications-service:
+    build: .
+    container_name: notifications-service
+    ports:
+      - "8006:8006"
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file:
+      - .env
+
+volumes:
+  rabbitmq-data:
