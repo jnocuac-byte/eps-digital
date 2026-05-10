@@ -22,8 +22,12 @@ function createClient(baseURL: string, requiresAuth = false) {
   if (requiresAuth) {
     client.interceptors.request.use((config) => {
       const token = useAuthStore.getState().token;
+      const userId = useAuthStore.getState().userId;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+      }
+      if (userId) {
+        config.headers['X-User-ID'] = userId;
       }
       return config;
     });
