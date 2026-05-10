@@ -75,7 +75,7 @@ app.add_middleware(
     allow_origin_regex=r"https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
-    allow_headers=["Authorization", "Content-Type", "Accept","X-User-ID"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-User-ID"],
 	max_age=600,
 )
 
@@ -95,7 +95,7 @@ def _parse_user_id_header(x_user_id: str | None) -> UUID:
 			detail="Header X-User-ID no es un UUID valido",
 		) from exc
 
-
+	
 @app.post("/citas", response_model=CitaResponse, tags=["citas"])
 def crear_cita(payload: CitaCreate, db: Session = Depends(get_db)) -> CitaResponse:
 	"""Crea una cita nueva."""
