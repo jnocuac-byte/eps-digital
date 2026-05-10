@@ -143,7 +143,7 @@ export default function AgendarCitaPage() {
         fecha_cita: fecha?.toISOString().split('T')[0],
         hora_inicio: convertToTimeFormat(hora),
         hora_fin: sumarMinutos(convertToTimeFormat(hora), duracionMinutos),
-        sede_id: "e4f9cf92-8537-4a0e-adec-490035f82645",
+        sede_id: "4bf0500a-e23a-4f57-a8e8-ce4c20223695",
         descripcion_sintomas: sintomas || undefined,
       }),
     onSuccess: () => {
