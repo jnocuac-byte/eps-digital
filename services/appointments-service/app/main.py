@@ -19,6 +19,7 @@ from app.crud import (
 	get_citas_by_estado,
 	get_citas_by_medico,
 	get_citas_by_usuario,
+	get_citas_historicas_by_usuario,
 	get_historial_by_cita,
 	get_recordatorios_pendientes,
 	reprogramar_cita,
@@ -114,6 +115,17 @@ def listar_citas_por_usuario(
 ) -> list[CitaResponse]:
 	"""Lista las citas de un usuario con paginacion."""
 	return get_citas_by_usuario(db, usuario_id, skip=skip, limit=limit)
+
+
+@app.get("/citas/usuario/{usuario_id}/historial", response_model=list[CitaResponse], tags=["citas"])
+def listar_citas_historicas(
+	usuario_id: UUID,
+	skip: int = Query(default=0, ge=0),
+	limit: int = Query(default=100, ge=1, le=500),
+	db: Session = Depends(get_db),
+) -> list[CitaResponse]:
+	"""Lista las citas historicas (canceladas, atendidas, no asistio) de un usuario."""
+	return get_citas_historicas_by_usuario(db, usuario_id, skip=skip, limit=limit)
 
 
 @app.get("/citas/medico/{medico_id}", response_model=list[CitaResponse], tags=["citas"])

@@ -81,7 +81,7 @@ export const citasApi = {
   getByUser: (userId: string) =>
     citasClient.get(`/citas/usuario/${userId}`),
   getHistorial: (userId: string) =>
-    citasClient.get(`/citas/historial/${userId}`),
+    citasClient.get(`/citas/usuario/${userId}/historial`),
   cancel: (citaId: string, motivo: string) =>
     citasClient.post(`/citas/${citaId}/cancelar`, { motivo }),
 };
