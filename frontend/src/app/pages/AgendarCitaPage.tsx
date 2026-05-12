@@ -103,15 +103,47 @@ export default function AgendarCitaPage() {
   useEffect(() => { setEspecialidadId(''); setMedicoId(''); }, [servicioId]);
   useEffect(() => { setMedicoId(''); }, [especialidadId]);
 
+  const mapTipoServicio = (nombre: string): string => {
+    const lower = nombre.toLowerCase();
+    if (lower.includes('general')) return 'medicina_general';
+    if (lower.includes('especialista') || lower.includes('cardiología') || lower.includes('pediatría')) return 'especialista';
+    if (lower.includes('urgencia')) return 'urgencias';
+    if (lower.includes('laboratorio')) return 'laboratorio';
+    return 'especialista'; // valor por defecto
+  };
+
+  const convertToTimeFormat = (horaStr: string): string => {
+    if (!horaStr) return '';
+    const [time, period] = horaStr.split(' ');
+    let [hours, minutes] = time.split(':');
+    let h = parseInt(hours, 10);
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    return `${h.toString().padStart(2, '0')}:${minutes}:00`;
+  };
+
+  const selectedEspecialidad = especialidades.find((e) => e.especialidad_id === especialidadId);
+  const duracionMinutos = selectedEspecialidad?.duracion_cita_minutos || 20;
+
+  const sumarMinutos = (horaStr: string, minutos: number): string => {
+    const [hours, minutes] = horaStr.split(':').map(Number);
+    const totalMinutos = hours * 60 + minutes + minutos;
+    const newHours = Math.floor(totalMinutos / 60);
+    const newMinutes = totalMinutos % 60;
+    return `${newHours.toString().padStart(2, '0')}:${newMinutes.toString().padStart(2, '0')}:00`;
+  };
+
   const mutation = useMutation({
     mutationFn: () =>
       citasApi.create({
         usuario_id: userId,
         medico_id: medicoId || undefined,
         especialidad_id: especialidadId || undefined,
-        tipo_servicio: servicioId,
+        tipo_servicio: mapTipoServicio(selectedServicio?.nombre || ''),
         fecha_cita: fecha?.toISOString().split('T')[0],
-        hora_inicio: hora,
+        hora_inicio: convertToTimeFormat(hora),
+        hora_fin: sumarMinutos(convertToTimeFormat(hora), duracionMinutos),
+        sede_id: "4bf0500a-e23a-4f57-a8e8-ce4c20223695",
         descripcion_sintomas: sintomas || undefined,
       }),
     onSuccess: () => {
@@ -122,7 +154,6 @@ export default function AgendarCitaPage() {
   });
 
   const selectedServicio = servicios.find((s) => s.servicio_id === servicioId);
-  const selectedEspecialidad = especialidades.find((e) => e.especialidad_id === especialidadId);
   const selectedMedico = medicos.find((m) => m.medico_id === medicoId);
 
   const canSubmit = servicioId && fecha && hora;

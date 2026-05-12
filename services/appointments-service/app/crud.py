@@ -87,6 +87,26 @@ def get_citas_by_usuario(
 	return list(db.scalars(stmt).all())
 
 
+def get_citas_historicas_by_usuario(
+	db: Session,
+	usuario_id: UUID,
+	skip: int = 0,
+	limit: int = 100,
+) -> list[Cita]:
+	"""Lista citas historicas (no programadas) de un usuario."""
+	stmt = (
+		select(Cita)
+		.where(
+			Cita.usuario_id == usuario_id,
+			Cita.estado != "programada",
+		)
+		.order_by(Cita.fecha_cita.desc(), Cita.hora_inicio)
+		.offset(skip)
+		.limit(limit)
+	)
+	return list(db.scalars(stmt).all())
+
+
 def get_citas_by_medico(
 	db: Session,
 	medico_id: UUID,

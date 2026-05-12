@@ -61,6 +61,7 @@ export interface Especialidad {
   especialidad_id: string;
   nombre: string;
   servicio_id: string;
+  duracion_cita_minutos?: number;
 }
 
 export interface Medico {
