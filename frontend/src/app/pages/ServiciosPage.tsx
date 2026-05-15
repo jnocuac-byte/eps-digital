@@ -139,7 +139,7 @@ function EspecialidadesModal({
           >
             Cerrar
           </button>
-          {servicio.disponible && (
+          {servicio.activo && (
             <Link
               to={`/citas/agendar?servicio=${servicio.servicio_id}`}
               className="flex-1 bg-[#2B3E59] text-white py-2 rounded-lg text-sm font-medium hover:bg-[#1e2d40] transition-colors flex items-center justify-center gap-2"
@@ -171,12 +171,12 @@ function ServicioCard({
 
       <span
         className={`text-xs font-semibold px-3 py-1 rounded-full mb-4
-          ${servicio.disponible ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}
+          ${servicio.activo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}
       >
-        {servicio.disponible ? '● Disponible' : '● No Disponible'}
+        {servicio.activo ? '● Disponible' : '● No Disponible'}
       </span>
 
-      {servicio.disponible ? (
+      {servicio.activo ? (
         <div className="flex flex-col gap-2 w-full">
           <button
             onClick={() => onVerEspecialidades(servicio)}
@@ -219,12 +219,12 @@ export default function ServiciosPage() {
       s.descripcion.toLowerCase().includes(search.toLowerCase());
     const matchDisp =
       filtroDisponible === 'todos' ||
-      (filtroDisponible === 'disponible' && s.disponible) ||
-      (filtroDisponible === 'no_disponible' && !s.disponible);
+      (filtroDisponible === 'disponible' && s.activo) ||
+      (filtroDisponible === 'no_disponible' && !s.activo);
     return matchSearch && matchDisp;
   });
 
-  const disponiblesCount = servicios.filter((s) => s.disponible).length;
+  const disponiblesCount = servicios.filter((s) => s.activo).length;
 
   return (
     <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-10">

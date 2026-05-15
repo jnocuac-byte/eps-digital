@@ -53,7 +53,8 @@ export interface Servicio {
   servicio_id: string;
   nombre: string;
   descripcion: string;
-  disponible: boolean;
+  activo?: boolean;
+  disponible?: boolean;
   icono?: string;
 }
 
