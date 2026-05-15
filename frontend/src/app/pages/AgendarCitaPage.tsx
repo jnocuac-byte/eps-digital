@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ArrowLeft, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../stores/authStore';
@@ -73,6 +73,7 @@ function MiniCalendar({ selected, onSelect }: { selected: Date | null; onSelect:
 
 export default function AgendarCitaPage() {
   const { userId } = useAuthStore();
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -147,6 +148,8 @@ export default function AgendarCitaPage() {
         descripcion_sintomas: sintomas || undefined,
       }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['citas', userId] });
+      qc.invalidateQueries({ queryKey: ['citas-historial', userId] });
       toast.success('¡Cita agendada exitosamente!');
       navigate('/citas/ver');
     },
