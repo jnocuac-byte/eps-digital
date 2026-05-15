@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router';
+import ReactMarkdown from 'react-markdown';
 import { Send, Mic, CalendarPlus, CalendarCheck, MapPin, Bot, User, Loader2 } from 'lucide-react';
 import { aiApi } from '../lib/apiClient';
 import type { ChatMessage } from '../types';
@@ -165,8 +166,14 @@ export default function AsistentePage() {
                       : 'bg-gray-100 text-gray-800 rounded-bl-sm'
                     }`}
                 >
-                  {msg.content}
-                  {msg.action && msg.action.especialidad_sugerida && (
+                  {msg.role === 'user' ? (
+                    msg.content
+                  ) : (
+                    <ReactMarkdown className="prose prose-sm max-w-none">
+                      {msg.content}
+                    </ReactMarkdown>
+                  )}
+                  {msg.role === 'assistant' && msg.action && msg.action.especialidad_sugerida && (
                     <div className="mt-2">
                       <Link
                         to="/citas/agendar"
