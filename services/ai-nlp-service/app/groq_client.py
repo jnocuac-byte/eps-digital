@@ -109,6 +109,7 @@ def chat_completion(messages: list[dict], tools: list | None = None) -> tuple[st
 		response = client.chat.completions.create(
 			model=GROQ_MODEL,
 			messages=messages,
+			max_tokens=400,
 		)
 	except Exception as exc:
 		raise RuntimeError(f"Error al invocar Groq chat completion: {exc}") from exc

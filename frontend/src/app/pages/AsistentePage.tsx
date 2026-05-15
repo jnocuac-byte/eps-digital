@@ -166,7 +166,7 @@ export default function AsistentePage() {
                     }`}
                 >
                   {msg.content}
-                  {msg.action && msg.action.includes('agendar') && (
+                  {msg.action && msg.action.especialidad_sugerida && (
                     <div className="mt-2">
                       <Link
                         to="/citas/agendar"
