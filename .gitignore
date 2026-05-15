@@ -253,3 +253,5 @@ Desktop.ini
 *.temp
 
 !frontend/src/app/lib/
+
+AGENTS.md
