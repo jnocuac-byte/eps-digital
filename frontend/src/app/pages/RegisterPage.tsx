@@ -84,11 +84,19 @@ export default function RegisterPage() {
       toast.success('¡Registro exitoso! Por favor inicia sesión.');
       navigate('/login');
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string; message?: string } } };
-      const msg =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        'Error al registrar. Por favor verifica los datos e intenta de nuevo.';
+      const error = err as { response?: { data?: { detail?: string | unknown[]; message?: string } } };
+      const detail = error?.response?.data?.detail;
+      let msg = 'Error al registrar. Por favor verifica los datos e intenta de nuevo.';
+
+      if (typeof detail === 'string') {
+        msg = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        const firstError = detail[0] as { msg?: string };
+        msg = firstError?.msg || 'Error de validación en los datos';
+      } else if (error?.response?.data?.message) {
+        msg = error.response.data.message;
+      }
+
       setApiError(msg);
     } finally {
       setLoading(false);
@@ -138,13 +146,19 @@ export default function RegisterPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de documento *</label>
               <select
-                {...form1.register('tipo_documento', { required: 'Requerido' })}
+                {...form1.register('tipo_documento', {
+                  required: 'Requerido',
+                  validate: (value) => ['CC', 'CE', 'PA', 'TI'].includes(value) || 'Tipo de documento inválido',
+                })}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
               >
                 {TIPO_DOC_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
+              {form1.formState.errors.tipo_documento && (
+                <p className="text-red-500 text-xs mt-1">{form1.formState.errors.tipo_documento.message}</p>
+              )}
             </div>
 
             <div>
@@ -271,10 +285,15 @@ export default function RegisterPage() {
                 <input
                   {...form2.register('password', {
                     required: 'Requerido',
-                    minLength: { value: 8, message: 'Mínimo 8 caracteres' },
+                    validate: (value) => {
+                      if (value.length < 8) return 'Mínimo 8 caracteres';
+                      if (!/[A-Z]/.test(value)) return 'Debe tener al menos una letra mayúscula';
+                      if (!/\d/.test(value)) return 'Debe tener al menos un número';
+                      return true;
+                    },
                   })}
                   type={showPass ? 'text' : 'password'}
-                  placeholder="Mínimo 8 caracteres"
+                  placeholder="Mínimo 8 caracteres, una mayúscula y un número"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] pr-10"
                 />
                 <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
