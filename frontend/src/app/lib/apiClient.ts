@@ -98,6 +98,10 @@ export const catalogoApi = {
 
 // AI API
 export const aiApi = {
-  chat: (mensaje: string, conversacion_id?: string) =>
-    aiClient.post('/chat', { mensaje, ...(conversacion_id ? { conversacion_id } : {}) }),
+  chat: (mensaje: string, conversacion_id?: string, usuario_id?: string) =>
+    aiClient.post('/chat', {
+      mensaje,
+      ...(conversacion_id ? { conversacion_id } : {}),
+      ...(usuario_id ? { usuario_id } : {}),
+    }),
 };

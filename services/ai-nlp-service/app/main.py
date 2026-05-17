@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import logging
+import os
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any
@@ -8,7 +11,9 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
 
-from .groq_client import chat_completion, clasificar_sintomas, configurar_groq
+from .groq_client import chat_completion, clasificar_sintomas, configurar_groq, ejecutar_funcion
+
+logger = logging.getLogger(__name__)
 from app.crud import (
 	cerrar_conversacion,
 	crear_clasificacion,
@@ -38,15 +43,24 @@ async def lifespan(app: FastAPI):
 		Base.metadata.create_all(bind=engine)
 	except Exception as exc:
 		raise RuntimeError(f"Error al inicializar la base de datos: ") from exc
-	
+
 	app.state.openai_ready = False
 	app.state.openai_error = ""
+	app.state.citas_service_url = None
+
 	try:
 		configurar_groq()
 		app.state.openai_ready = True
 	except ValueError as exc:
-		# Si falta API key, el servicio sigue arriba pero endpoints IA devuelven 503.
 		app.state.openai_error = str(exc)
+
+	citas_url = os.getenv("CITAS_SERVICE_URL")
+	if citas_url:
+		app.state.citas_service_url = citas_url
+		logger.info(f"Citas Service URL configurado: {citas_url}")
+	else:
+		logger.warning("CITAS_SERVICE_URL no configurado. Funciones de citas no disponibles.")
+
 	yield
 
 
@@ -130,8 +144,8 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 
 	try:
 		if payload.conversacion_id is None:
-			# A falta de usuario autenticado en este punto, se usa UUID nulo temporal.
-			conversacion = crear_conversacion(db, usuario_id=UUID("00000000-0000-0000-0000-000000000000"))
+			usuario_id = payload.usuario_id or UUID("00000000-0000-0000-0000-000000000000")
+			conversacion = crear_conversacion(db, usuario_id=usuario_id)
 		else:
 			conversacion = get_conversacion(db, payload.conversacion_id)
 			if conversacion is None:
@@ -140,7 +154,6 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 					detail="Conversacion no encontrada",
 				)
 
-		# Guarda mensaje del usuario.
 		crear_mensaje(
 			db,
 			conversacion_id=conversacion.conversacion_id,
@@ -148,16 +161,48 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 			contenido=payload.mensaje,
 		)
 
-		# Toma ultimos 10 mensajes para contexto.
 		historial = get_mensajes_by_conversacion(db, conversacion.conversacion_id, limit=10)
 		messages = _mapear_historial_a_mensajes_llm(historial)
 
-		respuesta_texto, _tool_call_data = chat_completion(
+		if payload.usuario_id:
+			messages.insert(0, {
+				"role": "system",
+				"content": f"El usuario actual esta autenticado. Su ID es: {payload.usuario_id}. Usa este ID cuando llames a funciones que requieran usuario_id.",
+			})
+
+		tools = get_assistant_tools()
+		respuesta_texto, tool_calls = chat_completion(
 			messages=messages,
-			tools=get_assistant_tools(),
+			tools=tools,
 		)
 
-		# Guarda respuesta del asistente.
+		if tool_calls:
+			for tc in tool_calls:
+				try:
+					arguments = json.loads(tc["arguments"]) if isinstance(tc["arguments"], str) else tc["arguments"]
+				except json.JSONDecodeError:
+					arguments = {}
+
+				resultado = ejecutar_funcion(tc["name"], arguments)
+
+				messages.append({
+					"role": "assistant",
+					"tool_calls": [{
+						"id": tc["id"],
+						"name": tc["name"],
+						"arguments": tc["arguments"],
+					}]
+				})
+				messages.append({
+					"role": "tool",
+					"tool_call_id": tc["id"],
+					"content": json.dumps(resultado),
+				})
+
+			respuesta_final, _ = chat_completion(messages=messages, tools=None)
+			if respuesta_final:
+				respuesta_texto = respuesta_final
+
 		crear_mensaje(
 			db,
 			conversacion_id=conversacion.conversacion_id,

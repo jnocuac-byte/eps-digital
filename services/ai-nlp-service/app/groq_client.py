@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
 
+import httpx
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -12,6 +14,8 @@ from .prompts import CLASIFICACION_PROMPT, SYSTEM_PROMPT
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 REQUEST_TIMEOUT_SECONDS = 30.0
+CITAS_TIMEOUT_SECONDS = 10.0
+logger = logging.getLogger(__name__)
 
 _groq_client: Groq | None = None
 
@@ -88,6 +92,117 @@ def _parsear_json_con_rescate(texto: str) -> dict[str, Any] | None:
 			return None
 
 
+def _sumar_minutos_a_hora(hora_str: str, minutos: int) -> str:
+	"""Suma minutos a una hora en formato HH:MM y retorna el resultado en formato HH:MM."""
+	try:
+		hora_part, minuto_part = hora_str.split(":")
+		hora = int(hora_part)
+		minuto = int(minuto_part)
+
+		total_minutos = hora * 60 + minuto + minutos
+		nueva_hora = (total_minutos // 60) % 24
+		nuevos_minutos = total_minutos % 60
+
+		return f"{nueva_hora:02d}:{nuevos_minutos:02d}"
+	except (ValueError, AttributeError) as exc:
+		logger.warning(f"Error al sumar minutos a hora {hora_str}: {exc}")
+		return hora_str
+
+
+def _obtener_citas_service_url() -> str | None:
+	"""Obtiene la URL del servicio de citas desde variables de entorno."""
+	load_dotenv()
+	return os.getenv("CITAS_SERVICE_URL")
+
+
+def _agendar_cita_en_citas_service(
+	usuario_id: str,
+	medico_id: str,
+	especialidad_id: str,
+	tipo_servicio: str,
+	fecha_cita: str,
+	hora_inicio: str,
+	sede_id: str,
+) -> dict[str, Any]:
+	"""Llama al Citas Service para agendar una cita real."""
+	citas_url = _obtener_citas_service_url()
+
+	if not citas_url:
+		return {
+			"ok": False,
+			"error": "CITAS_SERVICE_URL no configurado. No es posible agendar citas.",
+		}
+
+	hora_fin = _sumar_minutos_a_hora(hora_inicio, 30)
+
+	payload = {
+		"usuario_id": usuario_id,
+		"medico_id": medico_id,
+		"especialidad_id": especialidad_id,
+		"tipo_servicio": tipo_servicio,
+		"fecha_cita": fecha_cita,
+		"hora_inicio": hora_inicio,
+		"hora_fin": hora_fin,
+		"sede_id": sede_id,
+	}
+
+	headers = {
+		"Content-Type": "application/json",
+		"X-User-ID": usuario_id,
+	}
+
+	try:
+		with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+			response = client.post(
+				f"{citas_url}/citas",
+				json=payload,
+				headers=headers,
+			)
+
+			if response.status_code >= 200 and response.status_code < 300:
+				data = response.json()
+				return {
+					"ok": True,
+					"cita_id": str(data.get("cita_id", "")),
+					"fecha": fecha_cita,
+					"hora": hora_inicio,
+					"hora_fin": hora_fin,
+					"estado": data.get("estado", "programada"),
+					"mensaje": f"Cita agendada exitosamente. ID: {data.get('cita_id', 'N/A')}",
+				}
+			else:
+				error_detail = "Error desconocido"
+				try:
+					error_data = response.json()
+					error_detail = error_data.get("detail", error_data.get("message", str(error_data)))
+				except Exception:
+					error_detail = response.text or "Error desconocido"
+
+				return {
+					"ok": False,
+					"error": f"Error al agendar cita (HTTP {response.status_code}): {error_detail}",
+				}
+
+	except httpx.TimeoutException:
+		logger.error(f"Timeout al intentar agendar cita en {citas_url}")
+		return {
+			"ok": False,
+			"error": "Tiempo de espera agotado al conectar con el servicio de citas. Intenta de nuevo.",
+		}
+	except httpx.RequestError as exc:
+		logger.error(f"Error de conexion al Citas Service: {exc}")
+		return {
+			"ok": False,
+			"error": f"No se pudo conectar con el servicio de citas: {exc}",
+		}
+	except Exception as exc:
+		logger.error(f"Error inesperado al agendar cita: {exc}")
+		return {
+			"ok": False,
+			"error": f"Error inesperado al agendar la cita: {exc}",
+		}
+
+
 def configurar_groq() -> None:
 	"""Lee GROQ_API_KEY del entorno e inicializa el cliente Groq."""
 	global _groq_client
@@ -100,16 +215,19 @@ def configurar_groq() -> None:
 	_groq_client = Groq(api_key=api_key, timeout=REQUEST_TIMEOUT_SECONDS)
 
 
-def chat_completion(messages: list[dict], tools: list | None = None) -> tuple[str, dict | None]:
-	"""Envia mensajes a Groq y retorna texto de respuesta y tool call (actualmente None)."""
-	_ = tools
+def chat_completion(messages: list[dict], tools: list | None = None) -> tuple[str, list[dict] | None]:
+	"""Envia mensajes a Groq y retorna texto de respuesta y tool_calls si los hay."""
 	client = _asegurar_cliente()
+
+	tool_choice = "auto" if tools else None
 
 	try:
 		response = client.chat.completions.create(
 			model=GROQ_MODEL,
 			messages=messages,
 			max_tokens=400,
+			tools=tools,
+			tool_choice=tool_choice,
 		)
 	except Exception as exc:
 		raise RuntimeError(f"Error al invocar Groq chat completion: {exc}") from exc
@@ -117,8 +235,20 @@ def chat_completion(messages: list[dict], tools: list | None = None) -> tuple[st
 	if not response.choices:
 		raise RuntimeError("Groq no devolvio choices en la respuesta.")
 
-	content = response.choices[0].message.content or ""
-	return content, None
+	message = response.choices[0].message
+	content = message.content or ""
+
+	tool_calls = None
+	if message.tool_calls:
+		tool_calls = []
+		for tc in message.tool_calls:
+			tool_calls.append({
+				"id": tc.id,
+				"name": tc.function.name,
+				"arguments": tc.function.arguments,
+			})
+
+	return content, tool_calls
 
 
 def clasificar_sintomas(sintomas_texto: str) -> dict[str, Any]:
@@ -152,7 +282,8 @@ def clasificar_sintomas(sintomas_texto: str) -> dict[str, Any]:
 
 
 def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:
-	"""Simula ejecucion de tools hasta integrar servicios reales."""
+	"""Ejecuta funciones del asistente, algunas son simulaciones y otras llaman a servicios reales."""
+
 	if tool_name == "obtener_disponibilidad_citas":
 		especialidad = str(arguments.get("especialidad", "Medicina general"))
 		fecha = str(arguments.get("fecha", datetime.utcnow().date().isoformat()))
@@ -165,17 +296,30 @@ def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:
 		}
 
 	if tool_name == "agendar_cita":
-		fecha = str(arguments.get("fecha", datetime.utcnow().date().isoformat()))
-		hora = str(arguments.get("hora", "09:00"))
-		return {
-			"ok": True,
-			"tool": tool_name,
-			"cita_id": f"sim-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-			"fecha": fecha,
-			"hora": hora,
-			"estado": "confirmada",
-			"mensaje": "Cita agendada correctamente (simulacion).",
-		}
+		usuario_id = arguments.get("usuario_id")
+		medico_id = arguments.get("medico_id")
+		especialidad_id = arguments.get("especialidad_id")
+		tipo_servicio = arguments.get("tipo_servicio")
+		fecha = arguments.get("fecha")
+		hora = arguments.get("hora")
+		sede_id = arguments.get("sede_id")
+
+		if not all([usuario_id, medico_id, especialidad_id, tipo_servicio, fecha, hora, sede_id]):
+			return {
+				"ok": False,
+				"tool": tool_name,
+				"error": "Faltan datos requeridos para agendar la cita. Necesitas: usuario_id, medico_id, especialidad_id, tipo_servicio, fecha, hora, sede_id.",
+			}
+
+		return _agendar_cita_en_citas_service(
+			usuario_id=str(usuario_id),
+			medico_id=str(medico_id),
+			especialidad_id=str(especialidad_id),
+			tipo_servicio=str(tipo_servicio),
+			fecha_cita=str(fecha),
+			hora_inicio=str(hora),
+			sede_id=str(sede_id),
+		)
 
 	return {
 		"ok": False,

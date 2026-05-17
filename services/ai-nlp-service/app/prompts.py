@@ -19,6 +19,20 @@ Reglas principales:
 - Responde siempre en espanol, con lenguaje claro, empatico y accionable.
 - Si identificas posible riesgo vital, indica ir a urgencias de inmediato o llamar a emergencias.
 
+**AGENDAR CITAS - IMPORTANTE**:
+- SI el usuario desea agendar una cita medica, DEBES usar la herramienta 'agendar_cita'.
+- ANTES de llamar a agendar_cita, DEBES recopilar todos los datos requeridos:
+  * usuario_id: ID del usuario (te lo paso yo o pidelo si no lo tienes)
+  * especialidad_id: UUID de la especialidad medica
+  * medico_id: UUID del medico seleccionado
+  * tipo_servicio: uno de: "medicina_general", "especialista", "urgencias", "laboratorio"
+  * fecha_cita: fecha en formato YYYY-MM-DD
+  * hora_inicio: hora en formato HH:MM (24 horas)
+  * sede_id: UUID de la sede donde se atendera
+- Si no tienes alguno de estos datos, PREGUNTA al usuario antes de intentar agendar.
+- Cuando la cita se agende exitosamente, CONFIRMA al usuario con el ID de la cita generado.
+- Si hay un error al agendar, explica el problema al usuario y sugiere alternativas.
+
 IMPORTANTE - Formato y longitud:
 - **Responde en formato Markdown** para mejor lectura.
 - Usa **negritas** para palabras clave.
@@ -85,7 +99,7 @@ ASSISTANT_TOOLS: list[dict[str, Any]] = [
 		"type": "function",
 		"function": {
 			"name": "agendar_cita",
-			"description": "Agenda una cita medica con datos confirmados por el usuario.",
+			"description": "Agenda una cita medica con datos confirmados por el usuario. Requiere todos los campos para poder ejecutar la peticion.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -101,16 +115,24 @@ ASSISTANT_TOOLS: list[dict[str, Any]] = [
 						"type": "string",
 						"description": "UUID del medico seleccionado.",
 					},
+					"tipo_servicio": {
+						"type": "string",
+						"description": "Tipo de servicio: medicina_general, especialista, urgencias o laboratorio.",
+					},
 					"fecha": {
 						"type": "string",
-						"description": "Fecha de la cita en formato ISO YYYY-MM-DD.",
+						"description": "Fecha de la cita en formato YYYY-MM-DD.",
 					},
 					"hora": {
 						"type": "string",
-						"description": "Hora de la cita en formato HH:MM (24h).",
+						"description": "Hora de inicio de la cita en formato HH:MM (24h).",
+					},
+					"sede_id": {
+						"type": "string",
+						"description": "UUID de la sede donde se atendera la cita.",
 					},
 				},
-				"required": ["usuario_id", "especialidad_id", "medico_id", "fecha", "hora"],
+				"required": ["usuario_id", "especialidad_id", "medico_id", "tipo_servicio", "fecha", "hora", "sede_id"],
 				"additionalProperties": False,
 			},
 		},
