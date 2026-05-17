@@ -40,7 +40,7 @@ class Cita(Base):
 	medico_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
 	# Referencia a la especialidad en Catalogo Service.
-	especialidad_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+	especialidad_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
 	# Tipo de servicio: medicina_general, especialista, urgencias, laboratorio.
 	tipo_servicio: Mapped[str] = mapped_column(String(50), nullable=False)

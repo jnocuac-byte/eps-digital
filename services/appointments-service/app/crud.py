@@ -139,7 +139,7 @@ def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 		db.commit()
 	except IntegrityError as exc:
 		db.rollback()
-		raise ValueError("No se pudo crear la cita por conflicto de integridad") from exc
+		raise ValueError(f"No se pudo crear la cita: {exc}") from exc
 
 	db.refresh(nueva_cita)
 	return nueva_cita
