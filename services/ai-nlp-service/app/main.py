@@ -161,7 +161,7 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 			contenido=payload.mensaje,
 		)
 
-		historial = get_mensajes_by_conversacion(db, conversacion.conversacion_id, limit=10)
+		historial = get_mensajes_by_conversacion(db, conversacion.conversacion_id, limit=6)
 		messages = _mapear_historial_a_mensajes_llm(historial)
 
 		if payload.usuario_id:
@@ -183,14 +183,19 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 				except json.JSONDecodeError:
 					arguments = {}
 
+				logger.info(f"Ejecutando tool: {tc['name']} con args: {arguments}")
 				resultado = ejecutar_funcion(tc["name"], arguments)
+				logger.info(f"Resultado tool: {resultado}")
 
 				messages.append({
 					"role": "assistant",
 					"tool_calls": [{
 						"id": tc["id"],
-						"name": tc["name"],
-						"arguments": tc["arguments"],
+						"type": "function",
+						"function": {
+							"name": tc["name"],
+							"arguments": tc["arguments"],
+						}
 					}]
 				})
 				messages.append({
