@@ -26,6 +26,7 @@ export default function CancelarCitaPage() {
     mutationFn: () => citasApi.cancel(selectedCita!.cita_id, motivo || 'Sin motivo especificado'),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['citas', userId] });
+      qc.invalidateQueries({ queryKey: ['citas-historial', userId] });
       toast.success('Cita cancelada exitosamente');
       setConfirmOpen(false);
       setSelectedCita(null);

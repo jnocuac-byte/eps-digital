@@ -27,6 +27,7 @@ from app.auth import (
 	verificar_codigo_2fa,
 	verify_jwt_token,
 )
+from app.rabbitmq_client import publicar_evento
 from app.database import Base, engine, get_db
 from app.schemas import (
 	Enable2FARequest,
@@ -137,6 +138,16 @@ def register(
 			ip=request.client.host if request.client else None,
 			user_agent=request.headers.get("user-agent"),
 		)
+
+		publicar_evento(
+			evento="cuenta_creada",
+			payload={
+				"evento": "cuenta_creada",
+				"email": credencial.correo,
+				"nombre": credencial.correo.split("@")[0],
+			},
+		)
+
 		return {
 			"message": "Usuario registrado correctamente",
 			"success": True,

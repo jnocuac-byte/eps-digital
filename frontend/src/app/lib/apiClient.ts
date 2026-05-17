@@ -69,7 +69,7 @@ export const userApi = {
   getById: (userId: string) =>
     userClient.get(`/usuarios/${userId}`),
   update: (userId: string, data: Record<string, unknown>) =>
-    userClient.patch(`/usuarios/${userId}`, data),
+    userClient.put(`/usuarios/${userId}`, data),
   getCompleto: (userId: string) =>
     userClient.get(`/usuarios/${userId}/completo`),
 };
