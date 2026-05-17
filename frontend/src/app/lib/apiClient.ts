@@ -94,6 +94,20 @@ export const catalogoApi = {
     catalogoClient.get('/especialidades', { params: servicioId ? { servicio_id: servicioId } : {} }),
   getMedicos: (especialidadId?: string) =>
     catalogoClient.get('/medicos', { params: especialidadId ? { especialidad_id: especialidadId } : {} }),
+  getMedicosDisponibles: (servicioId?: string, especialidadId?: string, fecha?: string, horaInicio?: string, horaFin?: string) =>
+    catalogoClient.get('/medicos/disponibles', { 
+      params: {
+        ...(servicioId && { servicio_id: servicioId }),
+        ...(especialidadId && { especialidad_id: especialidadId }),
+        ...(fecha && { fecha }),
+        ...(horaInicio && { hora_inicio: horaInicio }),
+        ...(horaFin && { hora_fin: horaFin }),
+      }
+    }),
+  getDisponibilidadesMedico: (medicoId: string) =>
+    catalogoClient.get(`/disponibilidades/medico/${medicoId}`),
+  getSedes: () =>
+    catalogoClient.get('/sedes'),
 };
 
 // AI API

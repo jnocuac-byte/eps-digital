@@ -1,14 +1,78 @@
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, time, timezone
 from uuid import UUID
 
+import httpx
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Cita, HistorialEstado, Recordatorio
 from app.schemas import CitaCreate, CitaUpdate
+
+CATALOG_SERVICE_URL = os.getenv("CATALOG_SERVICE_URL", "http://localhost:8004")
+
+TIPO_SERVICIO_A_SERVICIO = {
+	"medicina_general": "Medicina General",
+	"especialista": "Medicina Especializada",
+	"urgencias": "Urgencias",
+	"laboratorio": "Laboratorio",
+}
+
+
+def _obtener_medico_automatico(
+	tipo_servicio: str,
+	especialidad_id: UUID | None,
+	fecha_cita: date,
+	hora_inicio: time,
+	hora_fin: time,
+) -> UUID | None:
+	"""Obtiene un medico disponible automaticamente (Round Robin)."""
+	servicio_nombre = TIPO_SERVICIO_A_SERVICIO.get(tipo_servicio)
+	if not servicio_nombre:
+		return None
+
+	try:
+		with httpx.Client(timeout=10.0) as client:
+			resp_servicios = client.get(
+				f"{CATALOG_SERVICE_URL}/servicios",
+				params={"solo_activos": True},
+			)
+			if resp_servicios.status_code != 200:
+				return None
+			servicios = resp_servicios.json()
+			servicio_obj = next(
+				(s for s in servicios if s["nombre"].lower() == servicio_nombre.lower()),
+				None,
+			)
+			if not servicio_obj:
+				return None
+
+			servicio_id = servicio_obj["servicio_id"]
+
+			params = {
+				"servicio_id": servicio_id,
+				"fecha": str(fecha_cita),
+				"hora_inicio": hora_inicio.isoformat(),
+				"hora_fin": hora_fin.isoformat(),
+			}
+			if especialidad_id:
+				params["especialidad_id"] = str(especialidad_id)
+
+			resp_medicos = client.get(
+				f"{CATALOG_SERVICE_URL}/medicos/disponibles",
+				params=params,
+			)
+			if resp_medicos.status_code != 200:
+				return None
+			medicos = resp_medicos.json()
+			if medicos:
+				return UUID(medicos[0]["medico_id"])
+	except Exception:
+		return None
+	return None
 
 
 def utc_now() -> datetime:
@@ -42,15 +106,32 @@ def es_horario_ocupado(
 
 def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 	"""Crea una cita validando disponibilidad horaria del medico."""
+	medico_id = cita_data.medico_id
+
+	if medico_id is None:
+		medico_id = _obtener_medico_automatico(
+			tipo_servicio=cita_data.tipo_servicio,
+			especialidad_id=cita_data.especialidad_id,
+			fecha_cita=cita_data.fecha_cita,
+			hora_inicio=cita_data.hora_inicio,
+			hora_fin=cita_data.hora_fin,
+		)
+		if medico_id is None:
+			raise ValueError(
+				"No hay médicos disponibles para el servicio y horario seleccionado. "
+				"Por favor selecciona un médico específico o intenta en otro horario."
+			)
+
 	if es_horario_ocupado(
 		db=db,
-		medico_id=cita_data.medico_id,
+		medico_id=medico_id,
 		fecha=cita_data.fecha_cita,
 		hora_inicio=cita_data.hora_inicio,
 		hora_fin=cita_data.hora_fin,
 	):
 		raise ValueError("El medico ya tiene una cita programada en ese horario")
 
+	cita_data.medico_id = medico_id
 	nueva_cita = Cita(**cita_data.model_dump())
 	db.add(nueva_cita)
 
