@@ -171,12 +171,15 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 			})
 
 		tools = get_assistant_tools()
+		logger.info(f"Enviando chat con {len(messages)} mensajes y {len(tools)} tools disponibles")
 		respuesta_texto, tool_calls = chat_completion(
 			messages=messages,
 			tools=tools,
 		)
+		logger.info(f"Respuesta inicial: {respuesta_texto[:200]}... | tool_calls: {tool_calls}")
 
 		if tool_calls:
+			logger.info(f"Se detectaron {len(tool_calls)} tool_calls, ejecutando...")
 			for tc in tool_calls:
 				try:
 					arguments = json.loads(tc["arguments"]) if isinstance(tc["arguments"], str) else tc["arguments"]

@@ -219,16 +219,20 @@ def chat_completion(messages: list[dict], tools: list | None = None) -> tuple[st
 	"""Envia mensajes a Groq y retorna texto de respuesta y tool_calls si los hay."""
 	client = _asegurar_cliente()
 
-	tool_choice = "auto" if tools else None
+	kwargs = {
+		"model": GROQ_MODEL,
+		"messages": messages,
+		"max_tokens": 400,
+	}
+
+	if tools:
+		kwargs["tools"] = tools
+		kwargs["tool_choice"] = "auto"
+
+	logger.debug(f"Llamando a Groq con {len(messages)} mensajes, tools={bool(tools)}")
 
 	try:
-		response = client.chat.completions.create(
-			model=GROQ_MODEL,
-			messages=messages,
-			max_tokens=400,
-			tools=tools,
-			tool_choice=tool_choice,
-		)
+		response = client.chat.completions.create(**kwargs)
 	except Exception as exc:
 		raise RuntimeError(f"Error al invocar Groq chat completion: {exc}") from exc
 
@@ -240,6 +244,7 @@ def chat_completion(messages: list[dict], tools: list | None = None) -> tuple[st
 
 	tool_calls = None
 	if message.tool_calls:
+		logger.info(f"Groq devolvio {len(message.tool_calls)} tool_calls")
 		tool_calls = []
 		for tc in message.tool_calls:
 			tool_calls.append({
