@@ -160,7 +160,7 @@ def _consultar_catalog_service(endpoint: str, params: dict | None = None) -> dic
 		return {"ok": False, "error": "Hubo un problema de conexión. ¿Querés que lo intentemos de nuevo?"}
 	except Exception as exc:
 		logger.error(f"Error inesperado al consultar catalogo: {exc}")
-		return {"ok": False, "error": "Ocurrió un error inesperado. ¿Querés usar el formulario directo?"}}
+		return {"ok": False, "error": "Ocurrió un error inesperado. ¿Querés usar el formulario directo?"}
 
 
 def _obtener_especialidades_del_catalog() -> dict[str, Any]:
