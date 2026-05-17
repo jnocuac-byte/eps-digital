@@ -147,27 +147,20 @@ def _consultar_catalog_service(endpoint: str, params: dict | None = None) -> dic
 				data = response.json()
 				return {"ok": True, "data": data}
 			else:
-				error_detail = "Error desconocido"
-				try:
-					error_data = response.json()
-					error_detail = error_data.get("detail", str(error_data))
-				except Exception:
-					error_detail = response.text or "Error desconocido"
-
 				return {
 					"ok": False,
-					"error": f"Error al consultar catalogo (HTTP {response.status_code}): {error_detail}",
+					"error": "No pude obtener la información en este momento. ¿Querés usar el formulario directo para buscar?",
 				}
 
 	except httpx.TimeoutException:
 		logger.error(f"Timeout al consultar catalog service: {endpoint}")
-		return {"ok": False, "error": "Tiempo de espera agotado al conectar con el servicio de catalogos."}
+		return {"ok": False, "error": "La consulta tardó demasiado. ¿Querés intentar de nuevo o usar el formulario?"}
 	except httpx.RequestError as exc:
 		logger.error(f"Error de conexion al Catalog Service: {exc}")
-		return {"ok": False, "error": f"No se pudo conectar con el servicio de catalogos: {exc}"}
+		return {"ok": False, "error": "Hubo un problema de conexión. ¿Querés que lo intentemos de nuevo?"}
 	except Exception as exc:
 		logger.error(f"Error inesperado al consultar catalogo: {exc}")
-		return {"ok": False, "error": f"Error inesperado al consultar catalogo: {exc}"}
+		return {"ok": False, "error": "Ocurrió un error inesperado. ¿Querés usar el formulario directo?"}}
 
 
 def _obtener_especialidades_del_catalog() -> dict[str, Any]:
@@ -177,7 +170,7 @@ def _obtener_especialidades_del_catalog() -> dict[str, Any]:
 		return {
 			"ok": True,
 			"especialidades": result.get("data", []),
-			"mensaje": f"Se encontraron {len(result.get('data', []))} especialidades.",
+			"mensaje": "Estas son las especialidades disponibles.",
 		}
 	return result
 
@@ -185,14 +178,14 @@ def _obtener_especialidades_del_catalog() -> dict[str, Any]:
 def _obtener_medicos_por_especialidad(especialidad_id: str) -> dict[str, Any]:
 	"""Obtiene la lista de médicos para una especialidad específica."""
 	if not especialidad_id:
-		return {"ok": False, "error": "especialidad_id es requerido."}
+		return {"ok": False, "error": "Necesito que me digas qué especialidad querés."}
 
-	result = _consultar_catalog_service("/medicos", {"especialidad_id": especialidad_id})
+	result = _consultar_catalog_service(f"/especialidades/{especialidad_id}/medicos")
 	if result.get("ok"):
 		return {
 			"ok": True,
 			"medicos": result.get("data", []),
-			"mensaje": f"Se encontraron {len(result.get('data', []))} médicos.",
+			"mensaje": "Aquí están los médicos disponibles.",
 		}
 	return result
 
@@ -204,7 +197,7 @@ def _obtener_sedes_del_catalog() -> dict[str, Any]:
 		return {
 			"ok": True,
 			"sedes": result.get("data", []),
-			"mensaje": f"Se encontraron {len(result.get('data', []))} sedes.",
+			"mensaje": "Estas son las sedes disponibles.",
 		}
 	return result
 
@@ -262,38 +255,31 @@ def _agendar_cita_en_citas_service(
 					"hora": hora_inicio,
 					"hora_fin": hora_fin,
 					"estado": data.get("estado", "programada"),
-					"mensaje": f"Cita agendada exitosamente. ID: {data.get('cita_id', 'N/A')}",
+					"mensaje": "¡Cita agendada correctamente!",
 				}
 			else:
-				error_detail = "Error desconocido"
-				try:
-					error_data = response.json()
-					error_detail = error_data.get("detail", error_data.get("message", str(error_data)))
-				except Exception:
-					error_detail = response.text or "Error desconocido"
-
 				return {
 					"ok": False,
-					"error": f"Error al agendar cita (HTTP {response.status_code}): {error_detail}",
+					"error": "Hubo un problema al agendar tu cita. ¿Querés que lo intentemos de nuevo o preferís usar el formulario directo?",
 				}
 
 	except httpx.TimeoutException:
 		logger.error(f"Timeout al intentar agendar cita en {citas_url}")
 		return {
 			"ok": False,
-			"error": "Tiempo de espera agotado al conectar con el servicio de citas. Intenta de nuevo.",
+			"error": "La solicitud tardó demasiado. ¿Querés intentarlo de nuevo?",
 		}
 	except httpx.RequestError as exc:
 		logger.error(f"Error de conexion al Citas Service: {exc}")
 		return {
 			"ok": False,
-			"error": f"No se pudo conectar con el servicio de citas: {exc}",
+			"error": "Hubo un problema de conexión. ¿Querés que lo intentemos de nuevo?",
 		}
 	except Exception as exc:
 		logger.error(f"Error inesperado al agendar cita: {exc}")
 		return {
 			"ok": False,
-			"error": f"Error inesperado al agendar la cita: {exc}",
+			"error": "Ocurrió un error inesperado. ¿Querés usar el formulario directo para agendar?",
 		}
 
 
@@ -400,7 +386,7 @@ def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:
 	if tool_name == "obtener_medicos":
 		especialidad_id = arguments.get("especialidad_id")
 		if not especialidad_id:
-			return {"ok": False, "error": "especialidad_id es requerido para obtener médicos."}
+			return {"ok": False, "error": "Necesito que me digas qué especialidad querés para mostrarte los médicos disponibles."}
 		return _obtener_medicos_por_especialidad(str(especialidad_id))
 
 	if tool_name == "obtener_sedes":
@@ -419,7 +405,7 @@ def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:
 			return {
 				"ok": False,
 				"tool": tool_name,
-				"error": "Faltan datos requeridos para agendar la cita. Necesitas: usuario_id, medico_id, especialidad_id, tipo_servicio, fecha, hora, sede_id.",
+				"error": "Me faltan algunos datos para agendar la cita. ¿Podrías confirmarme la fecha, hora y sede que preferís?",
 			}
 
 		return _agendar_cita_en_citas_service(
