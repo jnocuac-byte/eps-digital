@@ -115,6 +115,100 @@ def _obtener_citas_service_url() -> str | None:
 	return os.getenv("CITAS_SERVICE_URL")
 
 
+def _obtener_catalog_service_url() -> str | None:
+	"""Obtiene la URL del servicio de catalogos desde variables de entorno."""
+	load_dotenv()
+	return os.getenv("CATALOG_SERVICE_URL")
+
+
+def _consultar_catalog_service(endpoint: str, params: dict | None = None) -> dict[str, Any]:
+	"""Consulta al Catalog Service y retorna los datos."""
+	catalog_url = _obtener_catalog_service_url()
+
+	if not catalog_url:
+		return {
+			"ok": False,
+			"error": "CATALOG_SERVICE_URL no configurado.",
+		}
+
+	headers = {"Content-Type": "application/json"}
+
+	try:
+		with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+			url = f"{catalog_url}{endpoint}"
+			logger.info(f"Consultando catalog service: {url} with params {params}")
+
+			if params:
+				response = client.get(url, params=params, headers=headers)
+			else:
+				response = client.get(url, headers=headers)
+
+			if response.status_code >= 200 and response.status_code < 300:
+				data = response.json()
+				return {"ok": True, "data": data}
+			else:
+				error_detail = "Error desconocido"
+				try:
+					error_data = response.json()
+					error_detail = error_data.get("detail", str(error_data))
+				except Exception:
+					error_detail = response.text or "Error desconocido"
+
+				return {
+					"ok": False,
+					"error": f"Error al consultar catalogo (HTTP {response.status_code}): {error_detail}",
+				}
+
+	except httpx.TimeoutException:
+		logger.error(f"Timeout al consultar catalog service: {endpoint}")
+		return {"ok": False, "error": "Tiempo de espera agotado al conectar con el servicio de catalogos."}
+	except httpx.RequestError as exc:
+		logger.error(f"Error de conexion al Catalog Service: {exc}")
+		return {"ok": False, "error": f"No se pudo conectar con el servicio de catalogos: {exc}"}
+	except Exception as exc:
+		logger.error(f"Error inesperado al consultar catalogo: {exc}")
+		return {"ok": False, "error": f"Error inesperado al consultar catalogo: {exc}"}
+
+
+def _obtener_especialidades_del_catalog() -> dict[str, Any]:
+	"""Obtiene la lista de especialidades del Catalog Service."""
+	result = _consultar_catalog_service("/especialidades")
+	if result.get("ok"):
+		return {
+			"ok": True,
+			"especialidades": result.get("data", []),
+			"mensaje": f"Se encontraron {len(result.get('data', []))} especialidades.",
+		}
+	return result
+
+
+def _obtener_medicos_por_especialidad(especialidad_id: str) -> dict[str, Any]:
+	"""Obtiene la lista de médicos para una especialidad específica."""
+	if not especialidad_id:
+		return {"ok": False, "error": "especialidad_id es requerido."}
+
+	result = _consultar_catalog_service("/medicos", {"especialidad_id": especialidad_id})
+	if result.get("ok"):
+		return {
+			"ok": True,
+			"medicos": result.get("data", []),
+			"mensaje": f"Se encontraron {len(result.get('data', []))} médicos.",
+		}
+	return result
+
+
+def _obtener_sedes_del_catalog() -> dict[str, Any]:
+	"""Obtiene la lista de sedes del Catalog Service."""
+	result = _consultar_catalog_service("/sedes")
+	if result.get("ok"):
+		return {
+			"ok": True,
+			"sedes": result.get("data", []),
+			"mensaje": f"Se encontraron {len(result.get('data', []))} sedes.",
+		}
+	return result
+
+
 def _agendar_cita_en_citas_service(
 	usuario_id: str,
 	medico_id: str,
@@ -300,6 +394,18 @@ def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:
 			"cupos": ["09:00", "10:30", "14:00"],
 		}
 
+	if tool_name == "obtener_especialidades":
+		return _obtener_especialidades_del_catalog()
+
+	if tool_name == "obtener_medicos":
+		especialidad_id = arguments.get("especialidad_id")
+		if not especialidad_id:
+			return {"ok": False, "error": "especialidad_id es requerido para obtener médicos."}
+		return _obtener_medicos_por_especialidad(str(especialidad_id))
+
+	if tool_name == "obtener_sedes":
+		return _obtener_sedes_del_catalog()
+
 	if tool_name == "agendar_cita":
 		usuario_id = arguments.get("usuario_id")
 		medico_id = arguments.get("medico_id")
@@ -329,5 +435,5 @@ def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:
 	return {
 		"ok": False,
 		"tool": tool_name,
-		"error": "Tool no soportada en simulacion.",
+		"error": "Tool no soportada.",
 	}

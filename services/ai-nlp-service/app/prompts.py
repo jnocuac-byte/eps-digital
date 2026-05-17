@@ -20,23 +20,22 @@ Reglas principales:
 - Si identificas posible riesgo vital, indica ir a urgencias de inmediato o llamar a emergencias.
 
 **FUNCIONES DISPONIBLES - USO OBLIGATORIO**:
-Tienes acceso a herramientas (functions). CUANDO el usuario pida agendar una cita, DEBES usar la función 'agendar_cita' en lugar de responder con texto.
+Tienes acceso a funciones que puedes usar para obtener datos reales del sistema.
 
-Ejemplo de flujo correcto:
-Usuario: "Necesito agendar una cita con un cardiólogo"
-Tú: Debes DETECTAR la intención y usar la función, NO decir "con gusto te ayudo..."
+**FLUJO PARA AGENDAR CITAS**:
+1. Primero, llama a 'obtener_especialidades' para ver las especialidades disponibles
+2. Cuando el usuario elija una especialidad, llama a 'obtener_medicos' con el especialidad_id
+3. Llama a 'obtener_sedes' para ver las sedes disponibles
+4. Una vez que tengas todos los IDs (especialidad_id, medico_id, sede_id), pregunta al usuario fecha y hora
+5. Finalmente, llama a 'agendar_cita' con todos los datos completos
 
-Para usar la función agendar_cita:
-1. Si NO tienes todos los datos (especialidad_id, medico_id, tipo_servicio, fecha, hora, sede_id), PREGUNTA al usuario
-2. Si TIENES todos los datos, LLAMA a la función inmediatamente
-3. NUNCA respondas con texto cuando debas usar una función
-
-REGLAS CRÍTICAS:
-- "Necesito agendar cita" = LLAMA a agendar_cita
-- "Quiero una cita" = LLAMA a agendar_cita
-- "Pide cita para cardiology" = LLAMA a agendar_cita
-- "No tengo los datos" = PREGUNTA al usuario los datos faltantes
-- "Tengo todos los datos" = USA la función
+**REGLAS CRÍTICAS**:
+- NUNCA inventes UUIDs - siempre usa las funciones para obtener los IDs reales
+- Si no tienes especialidad_id, llama a obtener_especialidades
+- Si no tienes medico_id, llama a obtener_medicos
+- Si no tienes sede_id, llama a obtener_sedes
+- Solo llama a agendar_cita cuando tengas TODOS los datos: usuario_id, especialidad_id, medico_id, tipo_servicio, fecha, hora, sede_id
+- Si el usuario no proporciona fecha/hora, PREGÚNTASELA antes de agendar
 
 IMPORTANTE - Formato y longitud:
 - **Responde en formato Markdown** para mejor lectura.
@@ -154,6 +153,50 @@ ASSISTANT_TOOLS: list[dict[str, Any]] = [
 					},
 				},
 				"required": ["usuario_id", "especialidad_id", "medico_id", "tipo_servicio", "fecha", "hora", "sede_id"],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "obtener_especialidades",
+			"description": "Obtiene la lista de todas las especialidades medicas disponibles.",
+			"parameters": {
+				"type": "object",
+				"properties": {},
+				"required": [],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "obtener_medicos",
+			"description": "Obtiene la lista de medicos disponibles para una especialidad.",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"especialidad_id": {
+						"type": "string",
+						"description": "UUID de la especialidad para filtrar los medicos.",
+					},
+				},
+				"required": ["especialidad_id"],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "obtener_sedes",
+			"description": "Obtiene la lista de todas las sedes disponibles.",
+			"parameters": {
+				"type": "object",
+				"properties": {},
+				"required": [],
 				"additionalProperties": False,
 			},
 		},
