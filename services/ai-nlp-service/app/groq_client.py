@@ -400,6 +400,14 @@ def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:
 		fecha = arguments.get("fecha")
 		hora = arguments.get("hora")
 		sede_id = arguments.get("sede_id")
+		confirmado = arguments.get("confirmado", False)
+
+		if not confirmado:
+			return {
+				"ok": False,
+				"tool": tool_name,
+				"error": "Antes de agendar, necesito que confirmes los datos de la cita. ¿Estás seguro de que quieres agendar?",
+			}
 
 		if not all([usuario_id, medico_id, especialidad_id, tipo_servicio, fecha, hora, sede_id]):
 			return {
