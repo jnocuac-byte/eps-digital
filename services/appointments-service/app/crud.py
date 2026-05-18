@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 
 import httpx
@@ -192,11 +192,18 @@ def get_citas_by_medico(
 	db: Session,
 	medico_id: UUID,
 	fecha: date | None = None,
+	fecha_inicio: date | None = None,
+	fecha_fin: date | None = None,
 ) -> list[Cita]:
-	"""Lista citas de un medico, opcionalmente filtradas por fecha."""
+	"""Lista citas de un medico, opcionalmente filtradas por fecha o rango."""
 	stmt = select(Cita).where(Cita.medico_id == medico_id)
 	if fecha is not None:
 		stmt = stmt.where(Cita.fecha_cita == fecha)
+	elif fecha_inicio is not None or fecha_fin is not None:
+		if fecha_inicio is not None:
+			stmt = stmt.where(Cita.fecha_cita >= fecha_inicio)
+		if fecha_fin is not None:
+			stmt = stmt.where(Cita.fecha_cita <= fecha_fin)
 
 	stmt = stmt.order_by(Cita.fecha_cita, Cita.hora_inicio)
 	return list(db.scalars(stmt).all())
@@ -440,6 +447,67 @@ def get_recordatorios_pendientes(
 		.order_by(Recordatorio.programado_para)
 	)
 	return list(db.scalars(stmt).all())
+
+
+def get_metricas_citas(db: Session, dias: int = 7) -> dict:
+	"""Obtiene metricas agregadas de citas para dashboard administrativo."""
+	hoy = date.today()
+	inicio_rango = hoy - timedelta(days=dias - 1)
+
+	stmt_todas = select(Cita).where(
+		Cita.fecha_cita >= inicio_rango,
+		Cita.fecha_cita <= hoy,
+	)
+	citas_periodo = list(db.scalars(stmt_todas).all())
+
+	total_periodo = len(citas_periodo)
+	canceladas = sum(1 for c in citas_periodo if c.estado == "cancelada")
+	tasa_cancelacion = round((canceladas / total_periodo * 100) if total_periodo > 0 else 0, 1)
+
+	citas_hoy = [c for c in citas_periodo if c.fecha_cita == hoy]
+
+	por_dia = {}
+	for i in range(dias):
+		d = inicio_rango + timedelta(days=i)
+		por_dia[str(d)] = 0
+	for c in citas_periodo:
+		key = str(c.fecha_cita)
+		if key in por_dia:
+			por_dia[key] += 1
+
+	por_dia_list = [
+		{"fecha": fecha, "total": total}
+		for fecha, total in sorted(por_dia.items())
+	]
+
+	por_especialidad = {}
+	for c in citas_periodo:
+		esp = c.especialidad_nombre or "Sin especialidad"
+		por_especialidad[esp] = por_especialidad.get(esp, 0) + 1
+	top_especialidades = sorted(
+		[{"nombre": nombre, "total": total} for nombre, total in por_especialidad.items()],
+		key=lambda x: x["total"],
+		reverse=True,
+	)[:5]
+
+	por_medico = {}
+	for c in citas_periodo:
+		if c.medico_id:
+			med_id = str(c.medico_id)
+			if med_id not in por_medico:
+				por_medico[med_id] = {"medico_id": med_id, "nombres": c.medico_nombre or "Sin nombre", "total": 0}
+			por_medico[med_id]["total"] += 1
+	top_medicos = sorted(por_medico.values(), key=lambda x: x["total"], reverse=True)[:5]
+
+	return {
+		"total_hoy": len(citas_hoy),
+		"total_semana": total_periodo,
+		"tasa_cancelacion": tasa_cancelacion,
+		"canceladas": canceladas,
+		"por_dia": por_dia_list,
+		"top_especialidades": top_especialidades,
+		"top_medicos": top_medicos,
+	}
 
 
 def marcar_recordatorio_enviado(db: Session, recordatorio_id: UUID) -> Recordatorio:

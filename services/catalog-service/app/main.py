@@ -494,3 +494,12 @@ def validar_disponibilidad_medico(
 		hora_fin=hora_fin,
 	)
 	return {"disponible": disponible}
+
+
+@app.get("/medicos/con-especialidades", tags=["Medicos"])
+def listar_medicos_con_especialidades(
+	solo_activos: bool = Query(default=True),
+	db: Session = Depends(get_db),
+) -> list[dict]:
+	"""Lista medicos con sus especialidades incluidas en una sola respuesta."""
+	return crud.get_medicos_con_especialidades(db, solo_activos=solo_activos)

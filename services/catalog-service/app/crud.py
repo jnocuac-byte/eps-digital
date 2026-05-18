@@ -510,3 +510,34 @@ def get_medicos_disponibles(
 		return medicos_disponibles
 
 	return medicos
+
+
+def get_medicos_con_especialidades(
+	db: Session, solo_activos: bool = True
+) -> list[dict]:
+	"""Obtiene medicos con sus especialidades anidadas."""
+	medicos = get_medicos(db, solo_activos=solo_activos)
+	resultado = []
+	for medico in medicos:
+		asignaciones = get_medico_especialidades(db, medico.medico_id)
+		especialidades = []
+		for a in asignaciones:
+			esp = get_especialidad_by_id(db, a.especialidad_id)
+			if esp and (esp.activo or not solo_activos):
+				especialidades.append({
+					"especialidad_id": str(esp.especialidad_id),
+					"nombre": esp.nombre,
+					"servicio_id": str(esp.servicio_id),
+					"duracion_cita_minutos": esp.duracion_cita_minutos,
+					"es_principal": a.es_principal,
+				})
+		resultado.append({
+			"medico_id": str(medico.medico_id),
+			"nombres": medico.nombres,
+			"apellidos": medico.apellidos,
+			"numero_registro": medico.numero_registro,
+			"correo_institucional": medico.correo_institucional,
+			"activo": medico.activo,
+			"especialidades": especialidades,
+		})
+	return resultado

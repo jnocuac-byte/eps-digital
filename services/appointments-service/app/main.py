@@ -21,6 +21,7 @@ from app.crud import (
 	get_citas_by_usuario,
 	get_citas_historicas_by_usuario,
 	get_historial_by_cita,
+	get_metricas_citas,
 	get_recordatorios_pendientes,
 	reprogramar_cita,
 	update_cita,
@@ -132,10 +133,12 @@ def listar_citas_historicas(
 def listar_citas_por_medico(
 	medico_id: UUID,
 	fecha: date | None = Query(default=None),
+	fecha_inicio: date | None = Query(default=None),
+	fecha_fin: date | None = Query(default=None),
 	db: Session = Depends(get_db),
 ) -> list[CitaResponse]:
-	"""Lista citas de un medico; permite filtrar por fecha."""
-	return get_citas_by_medico(db, medico_id, fecha=fecha)
+	"""Lista citas de un medico; permite filtrar por fecha unica o rango de fechas."""
+	return get_citas_by_medico(db, medico_id, fecha=fecha, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
 
 
 @app.get("/citas/estado/{estado}", response_model=list[CitaResponse], tags=["citas"])
@@ -262,3 +265,12 @@ def crear_recordatorio_cita(cita_id: UUID, db: Session = Depends(get_db)) -> Rec
 def listar_recordatorios_pendientes(db: Session = Depends(get_db)) -> list[RecordatorioResponse]:
 	"""Obtiene recordatorios pendientes de envio hasta el momento actual."""
 	return get_recordatorios_pendientes(db)
+
+
+@app.get("/citas/metricas", tags=["admin"])
+def obtener_metricas(
+	dias: int = Query(default=7, ge=1, le=90),
+	db: Session = Depends(get_db),
+) -> dict:
+	"""Obtiene metricas agregadas de citas para dashboard administrativo."""
+	return get_metricas_citas(db, dias=dias)

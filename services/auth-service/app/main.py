@@ -579,3 +579,40 @@ def me(
 		"activo": credencial.activo,
 		"tiene_2fa": credencial.tiene_2fa,
 	}
+
+
+@app.get(
+	"/auth/perfil",
+	tags=["auth"],
+	responses={
+		200: {
+			"description": "Perfil basico del usuario autenticado",
+			"content": {
+				"application/json": {
+					"example": {
+						"usuario_id": "550e8400-e29b-41d4-a716-446655440000",
+						"rol": "admin",
+					}
+				}
+			},
+		},
+		401: {
+			"description": "Token invalido o expirado",
+		},
+	},
+)
+def obtener_perfil(
+	credentials: HTTPAuthorizationCredentials | None = Depends(security),
+	db: Session = Depends(get_db),
+) -> dict:
+	token = _extract_bearer_token(credentials)
+	credencial_id = _get_credencial_id_from_access_token(token)
+	credencial = get_credencial_by_id(db, credencial_id)
+
+	if not credencial:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credencial no encontrada")
+
+	return {
+		"usuario_id": str(credencial.usuario_id),
+		"rol": credencial.rol,
+	}
