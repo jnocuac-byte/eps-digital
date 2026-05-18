@@ -1,0 +1,262 @@
+services:
+  # =============================================
+  # Databases
+  # =============================================
+  auth-db:
+    image: postgres:15-alpine
+    container_name: eps-auth-db
+    environment:
+      POSTGRES_USER: eps_user
+      POSTGRES_PASSWORD: eps_password
+      POSTGRES_DB: eps_auth
+    ports:
+      - "5432:5432"
+    volumes:
+      - eps-auth-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eps_user -d eps_auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  user-db:
+    image: postgres:15-alpine
+    container_name: eps-user-db
+    environment:
+      POSTGRES_USER: eps_user
+      POSTGRES_PASSWORD: eps_password
+      POSTGRES_DB: eps_user
+    ports:
+      - "5433:5432"
+    volumes:
+      - eps-user-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eps_user -d eps_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  citas-db:
+    image: postgres:15-alpine
+    container_name: eps-citas-db
+    environment:
+      POSTGRES_USER: eps_user
+      POSTGRES_PASSWORD: eps_password
+      POSTGRES_DB: eps_citas
+    ports:
+      - "5434:5432"
+    volumes:
+      - eps-citas-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eps_user -d eps_citas"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  catalogo-db:
+    image: postgres:15-alpine
+    container_name: eps-catalogo-db
+    environment:
+      POSTGRES_USER: eps_user
+      POSTGRES_PASSWORD: eps_password
+      POSTGRES_DB: eps_catalogo
+    ports:
+      - "5435:5432"
+    volumes:
+      - eps-catalogo-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eps_user -d eps_catalogo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ainlp-db:
+    image: postgres:15-alpine
+    container_name: eps-ainlp-db
+    environment:
+      POSTGRES_USER: eps_user
+      POSTGRES_PASSWORD: eps_password
+      POSTGRES_DB: eps_ainlp
+    ports:
+      - "5436:5432"
+    volumes:
+      - eps-ainlp-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eps_user -d eps_ainlp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: eps-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - eps-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # =============================================
+  # Backend Services
+  # =============================================
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8001"
+    container_name: eps-auth-service
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://eps_user:eps_password@eps-auth-db:5432/eps_auth
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      USER_SERVICE_URL: ${USER_SERVICE_URL}
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    volumes:
+      - ./services/auth-service/alembic:/app/alembic
+      - ./services/auth-service/alembic.ini:/app/alembic.ini
+
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8002"
+    container_name: eps-user-service
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql://eps_user:eps_password@eps-user-db:5432/eps_user
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      user-db:
+        condition: service_healthy
+    volumes:
+      - ./services/user-service/alembic:/app/alembic
+      - ./services/user-service/alembic.ini:/app/alembic.ini
+
+  citas-service:
+    build:
+      context: ./services/appointments-service
+      dockerfile: Dockerfile
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8003"
+    container_name: eps-citas-service
+    ports:
+      - "8003:8003"
+    environment:
+      DATABASE_URL: postgresql://eps_user:eps_password@eps-citas-db:5432/eps_citas
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      CATALOG_SERVICE_URL: ${CATALOG_SERVICE_URL}
+    depends_on:
+      citas-db:
+        condition: service_healthy
+    volumes:
+      - ./services/appointments-service/alembic:/app/alembic
+      - ./services/appointments-service/alembic.ini:/app/alembic.ini
+
+  catalogo-service:
+    build:
+      context: ./services/catalog-service
+      dockerfile: Dockerfile
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8004"
+    container_name: eps-catalogo-service
+    ports:
+      - "8004:8004"
+    environment:
+      DATABASE_URL: postgresql://eps_user:eps_password@eps-catalogo-db:5432/eps_catalogo
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      catalogo-db:
+        condition: service_healthy
+    volumes:
+      - ./services/catalog-service/alembic:/app/alembic
+      - ./services/catalog-service/alembic.ini:/app/alembic.ini
+
+  ainlp-service:
+    build:
+      context: ./services/ai-nlp-service
+      dockerfile: Dockerfile
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8005"
+    container_name: eps-ainlp-service
+    ports:
+      - "8005:8005"
+    environment:
+      DATABASE_URL: postgresql://eps_user:eps_password@eps-ainlp-db:5432/eps_ainlp
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      CITAS_SERVICE_URL: ${CITAS_SERVICE_URL}
+      CATALOG_SERVICE_URL: ${CATALOG_SERVICE_URL}
+    depends_on:
+      ainlp-db:
+        condition: service_healthy
+    volumes:
+      - ./services/ai-nlp-service/alembic:/app/alembic
+      - ./services/ai-nlp-service/alembic.ini:/app/alembic.ini
+
+  notifications-service:
+    build:
+      context: ./services/notifications-service
+      dockerfile: Dockerfile
+    container_name: eps-notifications-service
+    ports:
+      - "8006:8006"
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # =============================================
+  # Frontend
+  # =============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: eps-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_AUTH_URL: ${VITE_AUTH_URL}
+      VITE_USER_URL: ${VITE_USER_URL}
+      VITE_CITAS_URL: ${VITE_CITAS_URL}
+      VITE_CATALOGO_URL: ${VITE_CATALOGO_URL}
+      VITE_AI_URL: ${VITE_AI_URL}
+      VITE_NOTIFICACIONES_URL: ${VITE_NOTIFICACIONES_URL}
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - auth-service
+      - user-service
+      - citas-service
+      - catalogo-service
+      - ainlp-service
+      - notifications-service
+
+networks:
+  default:
+    name: eps-network
+
+volumes:
+  eps-auth-data:
+  eps-user-data:
+  eps-citas-data:
+  eps-catalogo-data:
+  eps-ainlp-data:
+  eps-rabbitmq-data:
