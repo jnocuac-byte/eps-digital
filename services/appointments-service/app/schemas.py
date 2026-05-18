@@ -26,8 +26,8 @@ class CitaBase(BaseModel):
 	"""Campos base para crear y responder una cita."""
 
 	usuario_id: UUID
-	medico_id: UUID
-	especialidad_id: UUID
+	medico_id: UUID | None = None
+	especialidad_id: UUID | None = None
 	tipo_servicio: Literal["medicina_general", "especialista", "urgencias", "laboratorio"]
 	fecha_cita: date
 	hora_inicio: time
@@ -49,6 +49,13 @@ class CitaBase(BaseModel):
 		"""Valida que la hora de fin sea mayor que la hora de inicio."""
 		if self.hora_fin <= self.hora_inicio:
 			raise ValueError("hora_fin debe ser mayor que hora_inicio")
+		return self
+
+	@model_validator(mode="after")
+	def validar_medico_o_especialidad(self) -> CitaBase:
+		"""Valida que se proporcione medico_id o especialidad_id si no hay medico_id."""
+		if self.medico_id is None and self.especialidad_id is None:
+			raise ValueError("Se requiere medico_id o especialidad_id")
 		return self
 
 

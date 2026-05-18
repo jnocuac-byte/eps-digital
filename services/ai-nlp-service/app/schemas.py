@@ -82,6 +82,7 @@ class ChatRequest(BaseModel):
 
 	mensaje: str
 	conversacion_id: UUID | None = None
+	usuario_id: UUID | None = None
 
 
 class ChatResponse(BaseModel):

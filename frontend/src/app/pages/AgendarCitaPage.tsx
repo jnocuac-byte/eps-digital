@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ArrowLeft, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../stores/authStore';
 import { catalogoApi, citasApi } from '../lib/apiClient';
-import type { Servicio, Especialidad, Medico } from '../types';
+import type { Servicio, Especialidad, Medico, Sede, Disponibilidad } from '../types';
+
+const SEDE_DEFAULT = "4bf0500a-e23a-4f57-a8e8-ce4c20223695";
 
 const HORAS = [
   '07:00 AM', '07:30 AM', '08:00 AM', '08:30 AM', '09:00 AM', '09:30 AM',
@@ -83,6 +85,19 @@ export default function AgendarCitaPage() {
   const [fecha, setFecha] = useState<Date | null>(null);
   const [hora, setHora] = useState('');
   const [sintomas, setSintomas] = useState('');
+  const [sedeId, setSedeId] = useState(SEDE_DEFAULT);
+  const [horasDisponibles, setHorasDisponibles] = useState<string[]>(HORAS);
+
+  const { data: sedes = [] } = useQuery<Sede[]>({
+    queryKey: ['sedes'],
+    queryFn: () => catalogoApi.getSedes().then((r) => r.data),
+  });
+
+  const { data: disponibilidades = [] } = useQuery<Disponibilidad[]>({
+    queryKey: ['disponibilidades', medicoId],
+    queryFn: () => catalogoApi.getDisponibilidadesMedico(medicoId).then((r) => r.data),
+    enabled: !!medicoId,
+  });
 
   const { data: servicios = [] } = useQuery<Servicio[]>({
     queryKey: ['servicios'],
@@ -96,13 +111,63 @@ export default function AgendarCitaPage() {
   });
 
   const { data: medicos = [] } = useQuery<Medico[]>({
-    queryKey: ['medicos', especialidadId],
-    queryFn: () => catalogoApi.getMedicos(especialidadId).then((r) => r.data),
-    enabled: !!especialidadId,
+    queryKey: ['medicos', servicioId, especialidadId],
+    queryFn: () => catalogoApi.getMedicosDisponibles(
+      servicioId, 
+      especialidadId || undefined
+    ).then((r) => r.data),
+    enabled: !!servicioId,
   });
 
   useEffect(() => { setEspecialidadId(''); setMedicoId(''); }, [servicioId]);
   useEffect(() => { setMedicoId(''); }, [especialidadId]);
+
+  useEffect(() => {
+    if (!medicoId || !fecha || disponibilidades.length === 0) {
+      setHorasDisponibles(HORAS);
+      return;
+    }
+
+    const diaSemana = fecha.getDay() === 0 ? 7 : fecha.getDay();
+    const disponibilidadesDia = disponibilidades.filter(d => d.dia_semana === diaSemana);
+
+    if (disponibilidadesDia.length === 0) {
+      setHorasDisponibles([]);
+      return;
+    }
+
+    const horas: string[] = [];
+    disponibilidadesDia.forEach(disp => {
+      const horaInicio = disp.hora_inicio.substring(0, 5);
+      const horaFin = disp.hora_fin.substring(0, 5);
+
+      let [h, m] = horaInicio.split(':').map(Number);
+      const [hFin] = horaFin.split(':').map(Number);
+
+      while (h < hFin) {
+        const period = h >= 12 ? 'PM' : 'AM';
+        const h12 = h === 0 ? 12 : (h > 12 ? h - 12 : h);
+        horas.push(`${h12}:${m.toString().padStart(2, '0')} ${period}`);
+
+        m += 30;
+        if (m >= 60) {
+          h += 1;
+          m = 0;
+        }
+      }
+    });
+
+    const uniqueHoras = [...new Set(horas)].sort((a, b) => {
+      const [timeA, periodA] = a.split(' ');
+      const [timeB, periodB] = b.split(' ');
+      const [hA, mA] = timeA.split(':').map(Number);
+      const [hB, mB] = timeB.split(':').map(Number);
+      const adjA = periodA === 'PM' && hA !== 12 ? hA + 12 : hA;
+      const adjB = periodB === 'PM' && hB !== 12 ? hB + 12 : hB;
+      return adjA * 60 + mA - (adjB * 60 + mB);
+    });
+    setHorasDisponibles(uniqueHoras);
+  }, [medicoId, fecha, disponibilidades]);
 
   const mapTipoServicio = (nombre: string): string => {
     const lower = nombre.toLowerCase();
@@ -144,7 +209,7 @@ export default function AgendarCitaPage() {
         fecha_cita: fecha?.toISOString().split('T')[0],
         hora_inicio: convertToTimeFormat(hora),
         hora_fin: sumarMinutos(convertToTimeFormat(hora), duracionMinutos),
-        sede_id: "4bf0500a-e23a-4f57-a8e8-ce4c20223695",
+        sede_id: sedeId,
         descripcion_sintomas: sintomas || undefined,
       }),
     onSuccess: () => {
@@ -246,11 +311,30 @@ export default function AgendarCitaPage() {
                 <select
                   value={hora}
                   onChange={(e) => setHora(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
+                  disabled={horasDisponibles.length === 0}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] disabled:bg-gray-100 disabled:text-gray-500"
                 >
                   <option value="">Seleccionar hora...</option>
-                  {HORAS.map((h) => (
-                    <option key={h} value={h}>{h}</option>
+                  {horasDisponibles.length === 0 ? (
+                    <option disabled>No hay horarios disponibles</option>
+                  ) : (
+                    horasDisponibles.map((h) => (
+                      <option key={h} value={h}>{h}</option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              {/* Sede */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Sede</label>
+                <select
+                  value={sedeId}
+                  onChange={(e) => setSedeId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
+                >
+                  {sedes.map((s) => (
+                    <option key={s.sede_id} value={s.sede_id}>{s.nombre} - {s.direccion}</option>
                   ))}
                 </select>
               </div>

@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import { Send, Mic, CalendarPlus, CalendarCheck, MapPin, Bot, User, Loader2 } from 'lucide-react';
 import { aiApi } from '../lib/apiClient';
+import { useAuthStore } from '../stores/authStore';
 import type { ChatMessage } from '../types';
 
 const QUICK_ACTIONS = [
@@ -32,6 +33,7 @@ export default function AsistentePage() {
   const [conversacionId, setConversacionId] = useState<string | undefined>();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const userId = useAuthStore((state) => state.userId);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,7 +54,7 @@ export default function AsistentePage() {
     setLoading(true);
 
     try {
-      const res = await aiApi.chat(text.trim(), conversacionId);
+      const res = await aiApi.chat(text.trim(), conversacionId, userId || undefined);
       const { respuesta, conversacion_id, clasificacion } = res.data;
 
       if (conversacion_id && !conversacionId) {

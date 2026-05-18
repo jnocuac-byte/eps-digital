@@ -88,3 +88,23 @@ export interface ChatMessage {
   timestamp: Date;
   action?: string;
 }
+
+export interface Sede {
+  sede_id: string;
+  nombre: string;
+  direccion: string;
+  ciudad: string;
+  telefono?: string;
+  activo?: boolean;
+}
+
+export interface Disponibilidad {
+  disponibilidad_id: string;
+  medico_id: string;
+  especialidad_id: string;
+  sede_id: string;
+  dia_semana: number;
+  hora_inicio: string;
+  hora_fin: string;
+  activo?: boolean;
+}

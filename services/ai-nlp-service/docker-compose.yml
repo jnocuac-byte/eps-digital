@@ -27,6 +27,8 @@ services:
       DATABASE_URL: postgresql://eps_user:eps_password@ainlp-db:5432/eps_ainlp
       GROQ_API_KEY: ${GROQ_API_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      CITAS_SERVICE_URL: ${CITAS_SERVICE_URL:-http://citas-service:8003}
+      CATALOG_SERVICE_URL: ${CATALOG_SERVICE_URL:-http://catalog-service:8004}
     depends_on:
       ainlp-db:
         condition: service_healthy

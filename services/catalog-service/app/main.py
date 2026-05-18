@@ -224,6 +224,30 @@ def listar_medicos(
 
 
 @app.get(
+	"/medicos/disponibles",
+	response_model=list[MedicoResponse],
+	tags=["Medicos"],
+)
+def listar_medicos_disponibles(
+	servicio_id: UUID | None = Query(default=None),
+	especialidad_id: UUID | None = Query(default=None),
+	fecha: date | None = Query(default=None),
+	hora_inicio: time | None = Query(default=None),
+	hora_fin: time | None = Query(default=None),
+	db: Session = Depends(get_db),
+) -> list[MedicoResponse]:
+	"""Lista medicos disponibles segun filtros de servicio, especialidad y disponibilidad."""
+	return crud.get_medicos_disponibles(
+		db,
+		servicio_id=servicio_id,
+		especialidad_id=especialidad_id,
+		fecha=fecha,
+		hora_inicio=hora_inicio,
+		hora_fin=hora_fin,
+	)
+
+
+@app.get(
 	"/medicos/registro/{numero_registro}",
 	response_model=MedicoResponse,
 	tags=["Medicos"],

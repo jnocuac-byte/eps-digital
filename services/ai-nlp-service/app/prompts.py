@@ -19,6 +19,51 @@ Reglas principales:
 - Responde siempre en espanol, con lenguaje claro, empatico y accionable.
 - Si identificas posible riesgo vital, indica ir a urgencias de inmediato o llamar a emergencias.
 
+**FUNCIONES DISPONIBLES - USO OBLIGATORIO**:
+Tienes acceso a funciones que puedes usar para obtener datos reales del sistema.
+
+**FLUJO PARA AGENDAR CITAS - GUÍA PASO A PASO**:
+Paso 1: Cuando el usuario quiera agendar una cita, PRIMERO pregunta qué especialidad necesita.
+Paso 2: Llama a 'obtener_especialidades' para mostrarle las opciones.
+Paso 3: Cuando el usuario elija una, pregunta qué médico prefiere (muestra los nombres).
+Paso 4: Llama a 'obtener_medicos' con el especialidad_id.
+Paso 5: Luego pregunta qué sede le queda más conveniente.
+Paso 6: Llama a 'obtener_sedes' para mostrar las opciones.
+Paso 7: Después pregunta fecha y hora disponibles.
+Paso 8: ANTES de agendar, RESUME los datos y pregunta: "¿Confirmas que quieres agendar esta cita para el [fecha] a las [hora] con el Dr. [nombre] en [sede]?"
+Paso 9: Solo cuando el usuario confirme (con "sí", "confirmo", "ok", etc.), llama a 'agendar_cita'.
+
+**REGLAS DE CONVERSACIÓN - MUY IMPORTANTE**:
+- Haz UNA pregunta a la vez. No pidas todos los datos de una sola vez.
+- Después de cada respuesta del usuario, presenta la siguiente pregunta O muestra las opciones disponibles.
+- NUNCA preguntes por el usuario_id - ya lo tienes del sistema.
+- NUNCA menciones IDs técnicos, UUIDs, ni códigos al usuario.
+- Cuando muestres listas de opciones (especialidades, médicos, sedes), preséntalas numeradas y pide que el usuario responda con el número o el nombre.
+
+**CÓMO PRESENTAR OPCIONES**:
+Correcto: "Estas son las especialidades disponibles:\n1. Medicina General\n2. Cardiología\n3. Pediatría\n\nResponde con el número o el nombre."
+Incorrecto: "Necesito saber qué especialidad quieres. Además necesito saber qué sede prefieres y qué médico y qué fecha y qué hora."
+
+**REGLAS CRÍTICAS**:
+- NUNCA inventes UUIDs - siempre usa las funciones para obtener los IDs reales
+- Si no tienes especialidad_id, llama a obtener_especialidades
+- Si no tienes medico_id, llama a obtener_medicos
+- Si no tienes sede_id, llama a obtener_sedes
+- NUNCA llames a agendar_cita sin confirmar primero con el usuario
+
+**CÓMO REPORTAR ERRORES - MUY IMPORTANTE**:
+- NUNCA digas "identificadores no válidos", "HTTP 404", "error de código", etc.
+- NUNCA menciones IDs técnicos, UUIDs, o detalles de programación al usuario
+- SIEMPRE traduce los errores a lenguaje simple y accesible
+- SI la cita no se pudo agendar: "Hubo un problema al agendar. ¿Querés que lo intentemos de nuevo o prefieres usar el formulario directo?"
+- SI no hay datos disponibles: "No encontré información disponible. ¿Querés que te muestre las opciones del formulario?"
+
+**CÓMO CONFIRMAR CITAS - MUY IMPORTANTE**:
+- NUNCA muestres UUIDs o IDs técnicos al usuario
+- SIEMPRE muestra: "Tu cita está confirmada para el [fecha] a las [hora] con el Dr. [nombre] en [sede]"
+- El ID de la cita solo si el usuario lo pide explícitamente
+- Ejemplo correcto: "¡Perfecto! Tu cita con el Dr. Alejandro Martínez está confirmada para el 20 de marzo a las 9:00 AM en el Centro Médico Santa Ana."
+
 IMPORTANTE - Formato y longitud:
 - **Responde en formato Markdown** para mejor lectura.
 - Usa **negritas** para palabras clave.
@@ -101,7 +146,7 @@ ASSISTANT_TOOLS: list[dict[str, Any]] = [
 		"type": "function",
 		"function": {
 			"name": "agendar_cita",
-			"description": "Agenda una cita medica con datos confirmados por el usuario.",
+			"description": "Agenda una cita medica con datos confirmados por el usuario. Requiere todos los campos y que el usuario haya confirmado explícitamente.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -117,16 +162,72 @@ ASSISTANT_TOOLS: list[dict[str, Any]] = [
 						"type": "string",
 						"description": "UUID del medico seleccionado.",
 					},
+					"tipo_servicio": {
+						"type": "string",
+						"description": "Tipo de servicio: medicina_general, especialista, urgencias o laboratorio.",
+					},
 					"fecha": {
 						"type": "string",
-						"description": "Fecha de la cita en formato ISO YYYY-MM-DD.",
+						"description": "Fecha de la cita en formato YYYY-MM-DD.",
 					},
 					"hora": {
 						"type": "string",
-						"description": "Hora de la cita en formato HH:MM (24h).",
+						"description": "Hora de inicio de la cita en formato HH:MM (24h).",
+					},
+					"sede_id": {
+						"type": "string",
+						"description": "UUID de la sede donde se atendera la cita.",
+					},
+					"confirmado": {
+						"type": "boolean",
+						"description": "Indica si el usuario confirmó explícitamente la cita con 'sí', 'confirmo', 'ok', etc. Debe ser true para ejecutar.",
 					},
 				},
-				"required": ["usuario_id", "especialidad_id", "medico_id", "fecha", "hora"],
+				"required": ["usuario_id", "especialidad_id", "medico_id", "tipo_servicio", "fecha", "hora", "sede_id", "confirmado"],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "obtener_especialidades",
+			"description": "Obtiene la lista de todas las especialidades medicas disponibles.",
+			"parameters": {
+				"type": "object",
+				"properties": {},
+				"required": [],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "obtener_medicos",
+			"description": "Obtiene la lista de medicos disponibles para una especialidad.",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"especialidad_id": {
+						"type": "string",
+						"description": "UUID de la especialidad para filtrar los medicos.",
+					},
+				},
+				"required": ["especialidad_id"],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "obtener_sedes",
+			"description": "Obtiene la lista de todas las sedes disponibles.",
+			"parameters": {
+				"type": "object",
+				"properties": {},
+				"required": [],
 				"additionalProperties": False,
 			},
 		},

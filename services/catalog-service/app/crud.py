@@ -467,3 +467,46 @@ def verificar_disponibilidad(
 		)
 	)
 	return disponible is not None
+
+
+def get_medicos_disponibles(
+	db: Session,
+	servicio_id: UUID | None = None,
+	especialidad_id: UUID | None = None,
+	fecha: date | None = None,
+	hora_inicio: time | None = None,
+	hora_fin: time | None = None,
+) -> list[Medico]:
+	"""Obtiene medicos disponibles segun filtros.
+
+	Si se proporciona fecha y hora, filtra solo medicos con disponibilidad en ese horario.
+	Si no se proporciona hora, retorna todos los medicos que cumplen los filtros de servicio/especialidad.
+	"""
+	stmt = select(Medico).where(Medico.activo.is_(True))
+
+	if especialidad_id is not None:
+		stmt = stmt.join(MedicoEspecialidad).where(
+			MedicoEspecialidad.especialidad_id == especialidad_id,
+			MedicoEspecialidad.especialidad_id.in_(
+				select(Especialidad.especialidad_id).where(
+					Especialidad.activo.is_(True),
+					(Especialidad.servicio_id == servicio_id) if servicio_id else True,
+				)
+			)
+		)
+	elif servicio_id is not None:
+		stmt = stmt.join(MedicoEspecialidad).join(Especialidad).where(
+			Especialidad.servicio_id == servicio_id,
+			Especialidad.activo.is_(True),
+		)
+
+	medicos = list(db.scalars(stmt).unique().all())
+
+	if fecha and hora_inicio and hora_fin:
+		medicos_disponibles = []
+		for medico in medicos:
+			if verificar_disponibilidad(db, medico.medico_id, fecha, hora_inicio, hora_fin):
+				medicos_disponibles.append(medico)
+		return medicos_disponibles
+
+	return medicos
