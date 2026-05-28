@@ -1,4 +1,5 @@
-import { Link } from 'react-router';
+import { useEffect } from 'react';
+import { Link, useNavigate } from 'react-router';
 import { Calendar, Bot, MapPin, ArrowRight, MessageCircle, Clock } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useQuery } from '@tanstack/react-query';
@@ -26,7 +27,14 @@ const benefits = [
 ];
 
 export default function HomePage() {
-  const { isAuthenticated, user, userId } = useAuthStore();
+  const { isAuthenticated, user, userId, rol } = useAuthStore();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isAuthenticated && rol === 'medico') {
+      navigate('/medico/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, rol, navigate]);
 
   const { data: citasData } = useQuery({
     queryKey: ['citas', userId],
