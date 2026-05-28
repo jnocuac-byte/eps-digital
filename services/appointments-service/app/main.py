@@ -22,6 +22,7 @@ from app.crud import (
 	get_citas_historicas_by_usuario,
 	get_historial_by_cita,
 	get_metricas_citas,
+	get_metricas_medico,
 	get_recordatorios_pendientes,
 	reprogramar_cita,
 	update_cita,
@@ -274,3 +275,12 @@ def obtener_metricas(
 ) -> dict:
 	"""Obtiene metricas agregadas de citas para dashboard administrativo."""
 	return get_metricas_citas(db, dias=dias)
+
+
+@app.get("/citas/medico/{medico_id}/metricas", tags=["medico"])
+def obtener_metricas_medico(
+	medico_id: UUID,
+	db: Session = Depends(get_db),
+) -> dict:
+	"""Obtiene metricas del dashboard para un medico especifico."""
+	return get_metricas_medico(db, medico_id=medico_id)

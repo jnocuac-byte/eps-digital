@@ -52,6 +52,7 @@ export const userClient = createClient(BASE_URLS.user, true);
 export const citasClient = createClient(BASE_URLS.citas, true);
 export const catalogoClient = createClient(BASE_URLS.catalogo, true);
 export const aiClient = createClient(BASE_URLS.ai, true);
+export const notificacionesClient = createClient(BASE_URLS.notifications, true);
 
 // Auth API
 export const authApi = {
@@ -60,6 +61,7 @@ export const authApi = {
   register: (data: Record<string, unknown>) =>
     authClient.post('/auth/register', data),
   me: () => authClient.get('/auth/me'),
+  getMedicoId: () => authClient.get('/auth/medico-id'),
 };
 
 // User API
@@ -72,6 +74,8 @@ export const userApi = {
     userClient.put(`/usuarios/${userId}`, data),
   getCompleto: (userId: string) =>
     userClient.get(`/usuarios/${userId}/completo`),
+  buscarPorDocumento: (tipoDocumento: string, numeroDocumento: string) =>
+    userClient.get('/usuarios/buscar', { params: { tipo_documento: tipoDocumento, numero_documento: numeroDocumento } }),
 };
 
 // Citas API
@@ -84,6 +88,12 @@ export const citasApi = {
     citasClient.get(`/citas/usuario/${userId}/historial`),
   cancel: (citaId: string, motivo: string) =>
     citasClient.post(`/citas/${citaId}/cancelar`, { motivo }),
+  getCitasMedico: (medicoId: string, filters?: { fecha?: string; fecha_inicio?: string; fecha_fin?: string }) =>
+    citasClient.get(`/citas/medico/${medicoId}`, { params: filters }),
+  getMetricasMedico: (medicoId: string) =>
+    citasClient.get(`/citas/medico/${medicoId}/metricas`),
+  updateEstado: (citaId: string, estado: string) =>
+    citasClient.patch(`/citas/${citaId}/estado`, { estado }),
 };
 
 // Catálogo API
@@ -118,4 +128,14 @@ export const aiApi = {
       ...(conversacion_id ? { conversacion_id } : {}),
       ...(usuario_id ? { usuario_id } : {}),
     }),
+};
+
+// Notificaciones API
+export const notificacionesApi = {
+  getByMedico: (medicoId: string) =>
+    notificacionesClient.get(`/notificaciones/medico/${medicoId}`),
+  marcarLeida: (id: string) =>
+    notificacionesClient.patch(`/notificaciones/${id}/leida`),
+  marcarTodasLeidas: (medicoId: string) =>
+    notificacionesClient.patch(`/notificaciones/medico/${medicoId}/leer-todas`),
 };

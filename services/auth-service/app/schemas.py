@@ -321,6 +321,8 @@ class LoginResponse(BaseModel):
 	usuario_id: UUID
 	# Indica si se debe solicitar verificacion 2FA.
 	requiere_2fa: bool
+	# Rol del usuario (usuario, medico, admin).
+	rol: str | None = None
 
 	model_config = {
 		"json_schema_extra": {
@@ -330,6 +332,7 @@ class LoginResponse(BaseModel):
 				"token_type": "bearer",
 				"usuario_id": "550e8400-e29b-41d4-a716-446655440000",
 				"requiere_2fa": True,
+				"rol": "medico",
 			}
 		}
 	}

@@ -88,6 +88,12 @@ class Credencial(Base):
 		server_default=text("false"),
 	)
 
+	# UUID de referencia al medico en Catalog Service (solo para usuarios con rol medico).
+	medico_id: Mapped[uuid.UUID | None] = mapped_column(
+		SAUUID(as_uuid=True),
+		nullable=True,
+	)
+
 	# Fecha/hora de creacion del registro.
 	creado_en: Mapped[datetime] = mapped_column(
 		TIMESTAMP,

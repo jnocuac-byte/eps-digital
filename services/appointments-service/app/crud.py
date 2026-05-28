@@ -527,3 +527,41 @@ def marcar_recordatorio_enviado(db: Session, recordatorio_id: UUID) -> Recordato
 
 	db.refresh(recordatorio)
 	return recordatorio
+
+
+def get_metricas_medico(db: Session, medico_id: UUID) -> dict:
+	"""Obtiene metricas del dashboard para un medico especifico."""
+	hoy = date.today()
+	inicio_mes = hoy.replace(day=1)
+	en_7_dias = hoy + timedelta(days=7)
+
+	# Citas del medico en el mes actual
+	stmt_mes = select(Cita).where(
+		Cita.medico_id == medico_id,
+		Cita.fecha_cita >= inicio_mes,
+		Cita.fecha_cita <= hoy,
+	)
+	citas_mes = list(db.scalars(stmt_mes).all())
+
+	# Citas de hoy
+	citas_hoy = [c for c in citas_mes if c.fecha_cita == hoy and c.estado == "programada"]
+
+	# Proximas 7 dias
+	proximas_7 = [c for c in citas_mes if hoy < c.fecha_cita <= en_7_dias and c.estado == "programada"]
+
+	# Atendidas este mes
+	atendidas_mes = [c for c in citas_mes if c.estado == "atendida"]
+
+	# Tasa de asistencia
+	programadas_mes = [c for c in citas_mes if c.estado in ("programada", "atendida", "no_asistio")]
+	asistidas = sum(1 for c in programadas_mes if c.estado == "atendida")
+	tasa_asistencia = round((asistidas / len(programadas_mes) * 100) if programadas_mes else 0, 1)
+
+	return {
+		"citas_hoy": len(citas_hoy),
+		"proximas_7_dias": len(proximas_7),
+		"atendidas_mes": len(atendidas_mes),
+		"tiempo_espera_promedio_min": 0,
+		"tasa_asistencia_pct": tasa_asistencia,
+		"ingresos_mes": 0,
+	}

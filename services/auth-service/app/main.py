@@ -210,6 +210,7 @@ def login(
 			token_type="bearer",
 			usuario_id=credencial.usuario_id,
 			requiere_2fa=True,
+			rol=credencial.rol,
 		)
 
 	access_token, refresh_token = generar_tokens_para_credencial(credencial_id)
@@ -219,6 +220,7 @@ def login(
 		token_type="bearer",
 		usuario_id=credencial.usuario_id,
 		requiere_2fa=False,
+		rol=credencial.rol,
 	)
 
 
@@ -299,6 +301,7 @@ def login_documento(
 			token_type="bearer",
 			usuario_id=credencial.usuario_id,
 			requiere_2fa=True,
+			rol=credencial.rol,
 		)
 
 	access_token, refresh_token = generar_tokens_para_credencial(credencial_id)
@@ -308,6 +311,7 @@ def login_documento(
 		token_type="bearer",
 		usuario_id=credencial.usuario_id,
 		requiere_2fa=False,
+		rol=credencial.rol,
 	)
 
 
@@ -404,6 +408,7 @@ def verify_2fa(
 		"refresh_token": refresh_token,
 		"token_type": "bearer",
 		"usuario_id": str(credencial.usuario_id),
+		"rol": credencial.rol,
 	}
 
 
@@ -615,4 +620,45 @@ def obtener_perfil(
 	return {
 		"usuario_id": str(credencial.usuario_id),
 		"rol": credencial.rol,
+	}
+
+
+@app.get(
+	"/auth/medico-id",
+	tags=["auth"],
+	responses={
+		200: {
+			"description": "ID del medico asociado al usuario autenticado",
+			"content": {
+				"application/json": {
+					"example": {
+						"medico_id": "550e8400-e29b-41d4-a716-446655440000",
+					}
+				}
+			},
+		},
+		401: {
+			"description": "Token invalido o expirado",
+		},
+		404: {
+			"description": "Usuario no tiene medico asociado",
+		},
+	},
+)
+def obtener_medico_id(
+	credentials: HTTPAuthorizationCredentials | None = Depends(security),
+	db: Session = Depends(get_db),
+) -> dict:
+	token = _extract_bearer_token(credentials)
+	credencial_id = _get_credencial_id_from_access_token(token)
+	credencial = get_credencial_by_id(db, credencial_id)
+
+	if not credencial:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credencial no encontrada")
+
+	if not credencial.medico_id:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no tiene medico asociado")
+
+	return {
+		"medico_id": str(credencial.medico_id),
 	}
