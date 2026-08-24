@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Download, Search, Loader2, FileText, AlertTriangle } from 'lucide-react';
 import { citasApi } from '../../lib/apiClient';
+import { toISODateLocal } from '../../lib/fechas';
 import type { Cita } from '../../types';
 
 // Utilidad para exportar un array de objetos como CSV
@@ -37,8 +38,8 @@ const estadoColor: Record<string, string> = {
 };
 
 export default function AdminReportesPage() {
-  const hoy = new Date().toISOString().split('T')[0];
-  const haceUnMes = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const hoy = toISODateLocal(new Date());
+  const haceUnMes = toISODateLocal(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
   const [fechaInicio, setFechaInicio] = useState(haceUnMes);
   const [fechaFin, setFechaFin] = useState(hoy);

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Calendar, CheckCircle, XCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { authApi, citasApi } from '../../lib/apiClient';
+import { parseFechaLocal, toISODateLocal } from '../../lib/fechas';
 import { useAuthStore } from '../../stores/authStore';
 import type { Cita } from '../../types';
 
@@ -15,9 +16,9 @@ const estadoColor: Record<string, string> = {
 
 function SelectorFecha({ fecha, onChange }: { fecha: string; onChange: (f: string) => void }) {
   const avanzar = (dias: number) => {
-    const d = new Date(fecha);
+    const d = parseFechaLocal(fecha);
     d.setDate(d.getDate() + dias);
-    onChange(d.toISOString().split('T')[0]);
+    onChange(toISODateLocal(d));
   };
   const label = new Date(fecha + 'T00:00:00').toLocaleDateString('es-CO', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -47,7 +48,7 @@ function SelectorFecha({ fecha, onChange }: { fecha: string; onChange: (f: strin
 export default function MedicoCitasPage() {
   const qc = useQueryClient();
   const { setMedicoId, medicoId } = useAuthStore();
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
+  const [fecha, setFecha] = useState(toISODateLocal(new Date()));
 
   useEffect(() => {
     if (!medicoId) {
