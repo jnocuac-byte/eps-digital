@@ -1,0 +1,37 @@
+<h2>¿Cómo debería ser el login para médicos?</h2>
+<p class="subtitle">Actualmente solo hay un login general para pacientes. Necesitamos separar el acceso médico.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Ruta separada: /medico/login</h3>
+      <p>URL propia tipo <code>/medico/login</code>. Diseño diferente al login de pacientes. Redirige al panel médico automáticamente. Ideal para branding distinto y seguridad visual clara.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Toggle en el mismo login</h3>
+      <p>Un solo <code>/login</code> con un selector "Soy paciente / Soy médico". Cambia el formulario o el endpoint según el rol. Más simple pero mezcla ambos flujos.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>HomePage detecta rol y redirige</h3>
+      <p>Login único, pero el backend devuelve el rol del usuario. Si es médico, redirige a <code>/medico</code> automáticamente. Si es paciente, va al Home normal. Mínimo esfuerzo de UI.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <p class="label">Mi recomendación</p>
+  <p><strong>Opción A (ruta separada)</strong> — Es la más limpia porque:</p>
+  <ul>
+    <li>El médico nunca ve el login de pacientes (menos confusión)</li>
+    <li>Podemos agregar branding médico en el login</li>
+    <li>El enrutamiento es explícito y fácil de mantener</li>
+    <li>Escalable: podemos agregar <code>/admin/login</code> después si se necesita</li>
+  </ul>
+</div>

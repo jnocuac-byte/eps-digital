@@ -108,3 +108,35 @@ export interface Disponibilidad {
   hora_fin: string;
   activo?: boolean;
 }
+
+export interface MetricasMedico {
+  citas_hoy: number;
+  proximas_7_dias: number;
+  atendidas_mes: number;
+  tiempo_espera_promedio_min: number;
+  tasa_asistencia_pct: number;
+  ingresos_mes: number;
+}
+
+export interface CitaMedico extends Cita {
+  modalidad: 'telemedicina' | 'presencial';
+  paciente_nombre?: string;
+  paciente_documento?: string;
+  paciente_uuid_hce?: string;
+}
+
+export interface Notificacion {
+  notificacion_id: string;
+  medico_id: string;
+  tipo: 'cita_nueva' | 'cita_cancelada' | 'recordatorio' | 'sistema';
+  titulo: string;
+  descripcion: string;
+  leida: boolean;
+  enlace?: string;
+  creado_en: string;
+}
+
+export interface DisponibilidadMedico extends Disponibilidad {
+  especialidad_nombre?: string;
+  sede_nombre?: string;
+}

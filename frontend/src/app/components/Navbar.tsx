@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router';
 import {
   HeartPulse, Menu, X, Calendar, Clock, RotateCcw, History,
-  ChevronDown, LogOut, User
+  ChevronDown, LogOut, User, Stethoscope
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 
@@ -45,6 +45,7 @@ export function Navbar() {
 
   const navLinks = [
     { to: '/', label: 'Inicio' },
+    { to: '/medico/login', label: 'Portal Médico', icon: <Stethoscope size={14} />, publicOnly: true },
     { to: '/perfil', label: 'Mi Perfil', private: true },
     { to: '/asistente', label: 'Asistente Virtual', private: true },
     { to: '/servicios', label: 'Servicios' },
@@ -70,6 +71,19 @@ export function Navbar() {
           <div className="hidden lg:flex items-center gap-6">
             {navLinks.map((link) => {
               if (link.private && !isAuthenticated) return null;
+              if (link.publicOnly && isAuthenticated) return null;
+              if (link.icon) {
+                return (
+                  <Link
+                    key={link.to}
+                    to={link.to}
+                    className="flex items-center gap-1.5 border border-white text-white rounded-full px-4 py-1.5 text-sm font-medium hover:bg-white hover:text-[#2B3E59] transition-colors"
+                  >
+                    {link.icon}
+                    {link.label}
+                  </Link>
+                );
+              }
               return (
                 <Link
                   key={link.to}
@@ -157,6 +171,19 @@ export function Navbar() {
           <div className="px-4 py-4 space-y-1">
             {navLinks.map((link) => {
               if (link.private && !isAuthenticated) return null;
+              if (link.publicOnly && isAuthenticated) return null;
+              if (link.icon) {
+                return (
+                  <Link
+                    key={link.to}
+                    to={link.to}
+                    className="flex items-center gap-2 py-2.5 border border-white/50 text-white rounded-lg px-3 text-sm font-medium hover:bg-white hover:text-[#2B3E59] transition-colors"
+                  >
+                    {link.icon}
+                    {link.label}
+                  </Link>
+                );
+              }
               return (
                 <Link
                   key={link.to}

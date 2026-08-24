@@ -1,0 +1,53 @@
+<h2>¿Cómo estructurar el Login de Médicos?</h2>
+<p class="subtitle">Selecciona la opción que prefieras para el flujo de autenticación de médicos y pacientes.</p>
+
+<div class="options">
+  <div class="option" data-choice="opcion_a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Pestañas en la misma página de Login</h3>
+      <p>Una única página <code>/login</code> con pestañas "Pacientes" y "Médicos":</p>
+      <ul>
+        <li><strong>Pacientes:</strong> Inician sesión con Tipo/Número de Documento + Contraseña.</li>
+        <li><strong>Médicos:</strong> Inician sesión con Correo Institucional + Contraseña.</li>
+        <li><em>Ventaja:</em> Dirección única de ingreso, fácil de encontrar.</li>
+        <li><em>Desventaja:</em> Mezcla la interfaz pública del paciente con la del profesional.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="option" data-choice="opcion_b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Página de Login Independiente (Recomendada)</h3>
+      <p>Una página totalmente separada para el personal de salud (ej: <code>/medico/login</code>):</p>
+      <ul>
+        <li><strong>Pacientes:</strong> Siguen usando la página <code>/login</code> tradicional.</li>
+        <li><strong>Médicos:</strong> Entran a través de un enlace de "Portal Médicos" en el header/footer hacia <code>/medico/login</code>.</li>
+        <li><em>Ventaja:</em> Completa separación de flujos y branding profesional. Permite simplificar las rutas y layouts.</li>
+        <li><em>Desventaja:</em> Los médicos deben navegar al portal específico de salud para iniciar sesión.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 2rem;">
+  <h3>Detalles Técnicos Propuestos</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Beneficios de la Separación</h4>
+      <ul>
+        <li>Diferentes formularios (Documento vs Email).</li>
+        <li>Protección de rutas limpia mediante roles (<code>RoleRoute</code>).</li>
+        <li>Evita confusiones de usuario al intentar usar credenciales equivocadas.</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Consideraciones a Resolver</h4>
+      <ul>
+        <li>Necesidad de guardar el rol (<code>rol: 'medico' | 'paciente' | 'admin'</code>) en el store de autenticación (Zustand).</li>
+        <li>Mapear el <code>medico_id</code> de base de datos desde el token JWT.</li>
+      </ul>
+    </div>
+  </div>
+</div>
