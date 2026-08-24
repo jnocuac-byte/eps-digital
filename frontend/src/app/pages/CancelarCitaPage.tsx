@@ -134,7 +134,7 @@ export default function CancelarCitaPage() {
 
               <div className="flex flex-col gap-3">
                 <Link
-                  to="/citas/agendar"
+                  to={`/citas/agendar?reprogramar=${selectedCita.cita_id}`}
                   className="flex items-center justify-center gap-2 border-2 border-[#2B3E59] text-[#2B3E59] py-2.5 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
                 >
                   Reprogramar cita

@@ -198,6 +198,16 @@ class ReprogramarCitaRequest(BaseModel):
 	nueva_fecha: date
 	nueva_hora_inicio: time
 	nueva_hora_fin: time
+	motivo: str | None = Field(default=None, max_length=1000)
+
+	@field_validator("motivo")
+	@classmethod
+	def validar_motivo_reprogramacion(cls, value: str | None) -> str | None:
+		"""Normaliza el motivo para evitar cadenas vacias."""
+		if value is None:
+			return None
+		value = value.strip()
+		return value or None
 
 	@model_validator(mode="after")
 	def validar_rango_horas(self) -> ReprogramarCitaRequest:

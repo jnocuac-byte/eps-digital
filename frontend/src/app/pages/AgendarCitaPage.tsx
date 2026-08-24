@@ -5,7 +5,7 @@ import { CalendarDays, ArrowLeft, ChevronLeft, ChevronRight, Loader2 } from 'luc
 import { toast } from 'sonner';
 import { useAuthStore } from '../stores/authStore';
 import { catalogoApi, citasApi } from '../lib/apiClient';
-import type { Servicio, Especialidad, Medico, Sede } from '../types';
+import type { Servicio, Especialidad, Medico, Sede, Cita } from '../types';
 
 const SEDE_DEFAULT = "4bf0500a-e23a-4f57-a8e8-ce4c20223695";
 
@@ -77,6 +77,9 @@ export default function AgendarCitaPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
+  const citaAReprogramarId = searchParams.get('reprogramar');
+  const esReprogramacion = !!citaAReprogramarId;
+
   const [servicioId, setServicioId] = useState(searchParams.get('servicio') || '');
   const [especialidadId, setEspecialidadId] = useState('');
   const [medicoId, setMedicoId] = useState('');
@@ -84,6 +87,13 @@ export default function AgendarCitaPage() {
   const [hora, setHora] = useState('');
   const [sintomas, setSintomas] = useState('');
   const [sedeId, setSedeId] = useState(SEDE_DEFAULT);
+
+  // Cita original cuando se llega desde "Cancelar o Reprogramar" (?reprogramar={cita_id}).
+  const { data: citaOriginal } = useQuery<Cita>({
+    queryKey: ['cita-reprogramar', citaAReprogramarId],
+    queryFn: () => citasApi.getById(citaAReprogramarId!).then((r) => r.data),
+    enabled: esReprogramacion,
+  });
 
   const { data: sedes = [] } = useQuery<Sede[]>({
     queryKey: ['sedes'],
@@ -116,20 +126,27 @@ export default function AgendarCitaPage() {
 
   // Franjas horarias calculadas y validadas por el backend (America/Bogota).
   const fechaISO = fecha ? toISODate(fecha) : '';
-  const tieneFiltrosSlot = !!medicoId || !!especialidadId || !!servicioId;
+  // En reprogramacion los filtros salen de la cita original; en agendado, de los selects.
+  const slotFiltros = esReprogramacion
+    ? {
+        medico_id: citaOriginal?.medico_id || undefined,
+        especialidad_id: citaOriginal?.especialidad_id || undefined,
+        servicio_id: undefined,
+      }
+    : {
+        medico_id: medicoId || undefined,
+        especialidad_id: especialidadId || undefined,
+        servicio_id: servicioId || undefined,
+      };
+  const tieneFiltrosSlot = !!(slotFiltros.medico_id || slotFiltros.especialidad_id || slotFiltros.servicio_id);
 
   const { data: slots = [], isLoading: isLoadingSlots } = useQuery<
     { hora_inicio: string; hora_fin: string }[]
   >({
-    queryKey: ['slots', medicoId, especialidadId, servicioId, fechaISO],
+    queryKey: ['slots', slotFiltros.medico_id ?? '', slotFiltros.especialidad_id ?? '', slotFiltros.servicio_id ?? '', fechaISO],
     queryFn: () =>
       citasApi
-        .getSlotsDisponibles({
-          medico_id: medicoId || undefined,
-          especialidad_id: especialidadId || undefined,
-          servicio_id: servicioId || undefined,
-          fecha: fechaISO,
-        })
+        .getSlotsDisponibles({ ...slotFiltros, fecha: fechaISO })
         .then((r) => r.data),
     enabled: !!fechaISO && tieneFiltrosSlot,
     staleTime: 0,
@@ -151,7 +168,16 @@ export default function AgendarCitaPage() {
   const convertToTimeFormat = (horaStr: string): string => (horaStr ? `${horaStr}:00` : '');
 
   const selectedEspecialidad = especialidades.find((e) => e.especialidad_id === especialidadId);
-  const duracionMinutos = selectedEspecialidad?.duracion_cita_minutos || 20;
+  // En reprogramacion se conserva la duracion original de la cita (independiente del catalogo).
+  const calcularDuracionOriginal = (cita: Cita): number => {
+    const [h1, m1] = (cita.hora_inicio || '00:00').split(':').map(Number);
+    const [h2, m2] = (cita.hora_fin || '00:20').split(':').map(Number);
+    return Math.max(h2 * 60 + m2 - (h1 * 60 + m1), 10);
+  };
+  const duracionMinutos =
+    esReprogramacion && citaOriginal
+      ? calcularDuracionOriginal(citaOriginal)
+      : selectedEspecialidad?.duracion_cita_minutos || 20;
 
   const sumarMinutos = (horaStr: string, minutos: number): string => {
     const [hours, minutes] = horaStr.split(':').map(Number);
@@ -162,37 +188,52 @@ export default function AgendarCitaPage() {
   };
 
   const mutation = useMutation({
-    mutationFn: () =>
-      citasApi.create({
+    mutationFn: () => {
+      const horaInicioPayload = convertToTimeFormat(hora);
+      if (esReprogramacion && citaAReprogramarId) {
+        return citasApi.reprogramar(citaAReprogramarId, {
+          nueva_fecha: fecha ? toISODate(fecha) : '',
+          nueva_hora_inicio: horaInicioPayload,
+          nueva_hora_fin: sumarMinutos(horaInicioPayload, duracionMinutos),
+        });
+      }
+      return citasApi.create({
         usuario_id: userId,
         medico_id: medicoId || undefined,
         especialidad_id: especialidadId || undefined,
         tipo_servicio: mapTipoServicio(selectedServicio?.nombre || ''),
         fecha_cita: fecha ? toISODate(fecha) : '',
-        hora_inicio: convertToTimeFormat(hora),
-        hora_fin: sumarMinutos(convertToTimeFormat(hora), duracionMinutos),
+        hora_inicio: horaInicioPayload,
+        hora_fin: sumarMinutos(horaInicioPayload, duracionMinutos),
         sede_id: sedeId,
         descripcion_sintomas: sintomas || undefined,
-      }),
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['citas', userId] });
       qc.invalidateQueries({ queryKey: ['citas-historial', userId] });
-      toast.success('¡Cita agendada exitosamente!');
+      qc.invalidateQueries({ queryKey: ['slots'] });
+      toast.success(esReprogramacion ? '¡Cita reprogramada exitosamente!' : '¡Cita agendada exitosamente!');
       navigate('/citas/ver');
     },
-    onError: () => toast.error('Error al agendar la cita. Inténtalo de nuevo.'),
+    onError: () =>
+      toast.error(esReprogramacion ? 'Error al reprogramar la cita. Inténtalo de nuevo.' : 'Error al agendar la cita. Inténtalo de nuevo.'),
   });
 
   const selectedServicio = servicios.find((s) => s.servicio_id === servicioId);
   const selectedMedico = medicos.find((m) => m.medico_id === medicoId);
 
-  const canSubmit = servicioId && fecha && hora;
+  const canSubmit = esReprogramacion
+    ? !!citaOriginal && !!fecha && !!hora
+    : !!(servicioId && fecha && hora);
 
   return (
     <div>
       <div className="flex items-center gap-3 mb-6">
         <CalendarDays size={28} className="text-[#2B3E59]" />
-        <h2 className="font-inter text-2xl font-bold text-[#2B3E59]">Agendar Nueva Cita</h2>
+        <h2 className="font-inter text-2xl font-bold text-[#2B3E59]">
+          {esReprogramacion ? 'Reprogramar Cita' : 'Agendar Nueva Cita'}
+        </h2>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -201,6 +242,27 @@ export default function AgendarCitaPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left column */}
             <div className="space-y-4">
+              {esReprogramacion ? (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                  <p className="text-sm font-semibold text-[#2B3E59] mb-2">Cita a reprogramar</p>
+                  <p className="text-sm text-gray-800">{citaOriginal?.tipo_servicio || 'Consulta médica'}</p>
+                  {citaOriginal?.medico_nombre && (
+                    <p className="text-xs text-gray-500 mt-0.5">Dr. {citaOriginal.medico_nombre}</p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Actual:{' '}
+                    {citaOriginal
+                      ? `${new Date(`${citaOriginal.fecha_cita}T00:00:00`).toLocaleDateString('es-CO', {
+                          weekday: 'long', day: 'numeric', month: 'long',
+                        })} · ${citaOriginal.hora_inicio.slice(0, 5)}`
+                      : 'cargando...'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-3">
+                    El servicio, el médico y la sede se mantienen. Solo puedes cambiar fecha y hora.
+                  </p>
+                </div>
+              ) : (
+                <>
               {/* Tipo de Servicio */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Servicio</label>
@@ -249,6 +311,8 @@ export default function AgendarCitaPage() {
                   ))}
                 </select>
               </div>
+                </>
+              )}
             </div>
 
             {/* Right column - Calendar */}
@@ -291,32 +355,36 @@ export default function AgendarCitaPage() {
               </div>
 
               {/* Sede */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Sede</label>
-                <select
-                  value={sedeId}
-                  onChange={(e) => setSedeId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
-                >
-                  {sedes.map((s) => (
-                    <option key={s.sede_id} value={s.sede_id}>{s.nombre} - {s.direccion}</option>
-                  ))}
-                </select>
-              </div>
+              {!esReprogramacion && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Sede</label>
+                  <select
+                    value={sedeId}
+                    onChange={(e) => setSedeId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
+                  >
+                    {sedes.map((s) => (
+                      <option key={s.sede_id} value={s.sede_id}>{s.nombre} - {s.direccion}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Síntomas */}
-          <div className="mt-5">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Descripción de Síntomas</label>
-            <textarea
-              value={sintomas}
-              onChange={(e) => setSintomas(e.target.value)}
-              rows={4}
-              placeholder="Describe brevemente tus síntomas para que el sistema pueda asignarte el especialista correcto..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] resize-none"
-            />
-          </div>
+          {!esReprogramacion && (
+            <div className="mt-5">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Descripción de Síntomas</label>
+              <textarea
+                value={sintomas}
+                onChange={(e) => setSintomas(e.target.value)}
+                rows={4}
+                placeholder="Describe brevemente tus síntomas para que el sistema pueda asignarte el especialista correcto..."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] resize-none"
+              />
+            </div>
+          )}
 
           {/* Buttons */}
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
@@ -332,7 +400,7 @@ export default function AgendarCitaPage() {
               className="flex-1 bg-[#2B3E59] text-white font-semibold py-2.5 rounded-lg text-sm hover:bg-[#1e2d40] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {mutation.isPending ? <Loader2 size={16} className="animate-spin" /> : null}
-              Confirmar Cita
+              {esReprogramacion ? 'Confirmar Reprogramación' : 'Confirmar Cita'}
             </button>
           </div>
         </div>
@@ -344,12 +412,12 @@ export default function AgendarCitaPage() {
           </h3>
           <div className="space-y-4 text-sm">
             {[
-              { label: 'Servicio', value: selectedServicio?.nombre },
-              { label: 'Especialidad', value: selectedEspecialidad?.nombre },
-              { label: 'Médico', value: selectedMedico ? `Dr. ${selectedMedico.nombres} ${selectedMedico.apellidos}` : undefined },
+              { label: 'Servicio', value: esReprogramacion ? citaOriginal?.tipo_servicio : selectedServicio?.nombre },
+              { label: 'Especialidad', value: esReprogramacion ? undefined : selectedEspecialidad?.nombre },
+              { label: 'Médico', value: !esReprogramacion && selectedMedico ? `Dr. ${selectedMedico.nombres} ${selectedMedico.apellidos}` : undefined },
               { label: 'Fecha', value: fecha?.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) },
               { label: 'Hora', value: hora },
-              { label: 'Síntomas', value: sintomas ? (sintomas.length > 40 ? sintomas.substring(0, 40) + '...' : sintomas) : undefined },
+              { label: 'Síntomas', value: esReprogramacion ? undefined : (sintomas ? (sintomas.length > 40 ? sintomas.substring(0, 40) + '...' : sintomas) : undefined) },
             ].map((item) => (
               <div key={item.label} className="border-b border-white/10 pb-3">
                 <p className="text-white/60 text-xs mb-0.5">{item.label}:</p>

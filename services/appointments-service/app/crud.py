@@ -494,11 +494,17 @@ def reprogramar_cita(
 	nueva_hora_inicio: time,
 	nueva_hora_fin: time,
 	realizado_por: UUID,
+	motivo: str | None = None,
 ) -> Cita:
-	"""Reprograma una cita validando que el nuevo horario este disponible."""
+	"""Reprograma una cita programada validando disponibilidad y registrando historial."""
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise ValueError(f"No existe cita con id {cita_id}")
+
+	if cita.estado != "programada":
+		raise ValueError("Solo se puede reprogramar una cita en estado 'programada'")
+
+	_validar_fecha_futura(nueva_fecha, nueva_hora_inicio)
 
 	if es_horario_ocupado(
 		db=db,
@@ -510,11 +516,6 @@ def reprogramar_cita(
 	):
 		raise ValueError("El medico ya tiene una cita programada en el nuevo horario")
 
-	estado_anterior = cita.estado
-	if cita.estado != "programada":
-		# Al reprogramar, la cita vuelve a quedar programada.
-		cita.estado = "programada"
-
 	cita.fecha_cita = nueva_fecha
 	cita.hora_inicio = nueva_hora_inicio
 	cita.hora_fin = nueva_hora_fin
@@ -525,15 +526,14 @@ def reprogramar_cita(
 		db.rollback()
 		raise ValueError("No se pudo reprogramar la cita") from exc
 
-	if cita.estado != estado_anterior:
-		add_historial_estado(
-			db=db,
-			cita_id=cita.cita_id,
-			estado_anterior=estado_anterior,
-			estado_nuevo=cita.estado,
-			motivo="Reprogramacion de cita",
-			realizado_por=realizado_por,
-		)
+	add_historial_estado(
+		db=db,
+		cita_id=cita.cita_id,
+		estado_anterior="programada",
+		estado_nuevo="programada",
+		motivo=motivo or "Reprogramacion de cita",
+		realizado_por=realizado_por,
+	)
 
 	db.refresh(cita)
 	return cita

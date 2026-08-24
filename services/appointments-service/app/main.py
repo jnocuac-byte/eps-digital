@@ -285,6 +285,7 @@ def reprogramar_cita_endpoint(
 			payload.nueva_hora_inicio,
 			payload.nueva_hora_fin,
 			realizado_por,
+			motivo=payload.motivo,
 		)
 	except ValueError as exc:
 		mensaje = str(exc)
