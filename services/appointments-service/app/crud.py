@@ -445,6 +445,48 @@ def cancelar_cita(db: Session, cita_id: UUID, motivo: str | None, realizado_por:
 	return cita
 
 
+def cambiar_estado_cita(
+	db: Session,
+	cita_id: UUID,
+	nuevo_estado: str,
+	motivo: str | None,
+	realizado_por: UUID,
+) -> Cita:
+	"""Cambia el estado de una cita programada y registra el historial."""
+	cita = get_cita_by_id(db, cita_id)
+	if not cita:
+		raise ValueError(f"No existe cita con id {cita_id}")
+
+	if nuevo_estado == cita.estado:
+		return cita
+
+	if cita.estado != "programada":
+		raise ValueError(
+			"Solo se puede cambiar el estado de una cita en estado 'programada'"
+		)
+
+	estado_anterior = cita.estado
+	cita.estado = nuevo_estado
+
+	try:
+		db.commit()
+	except IntegrityError as exc:
+		db.rollback()
+		raise ValueError("No se pudo cambiar el estado de la cita") from exc
+
+	add_historial_estado(
+		db=db,
+		cita_id=cita.cita_id,
+		estado_anterior=estado_anterior,
+		estado_nuevo=nuevo_estado,
+		motivo=motivo,
+		realizado_por=realizado_por,
+	)
+
+	db.refresh(cita)
+	return cita
+
+
 def reprogramar_cita(
 	db: Session,
 	cita_id: UUID,

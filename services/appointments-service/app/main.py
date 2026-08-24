@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.crud import (
 	cancelar_cita,
+	cambiar_estado_cita,
 	create_cita,
 	create_recordatorio,
 	delete_cita,
@@ -31,6 +32,7 @@ from app.crud import (
 from app.database import Base, engine, get_db
 from app.schemas import (
 	CancelarCitaRequest,
+	CambioEstadoRequest,
 	CitaCreate,
 	CitaResponse,
 	CitaUpdate,
@@ -237,6 +239,29 @@ def cancelar_cita_endpoint(
 	realizado_por = _parse_user_id_header(x_user_id)
 	try:
 		return cancelar_cita(db, cita_id, payload.motivo, realizado_por)
+	except ValueError as exc:
+		mensaje = str(exc)
+		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST
+		raise HTTPException(status_code=status_code, detail=mensaje) from exc
+
+
+@app.patch("/citas/{cita_id}/estado", response_model=CitaResponse, tags=["medico"])
+def cambiar_estado_cita_endpoint(
+	cita_id: UUID,
+	payload: CambioEstadoRequest,
+	x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+	db: Session = Depends(get_db),
+) -> CitaResponse:
+	"""Cambia el estado de una cita programada (atendida, no_asistio, cancelada)."""
+	realizado_por = _parse_user_id_header(x_user_id)
+	try:
+		return cambiar_estado_cita(
+			db,
+			cita_id,
+			nuevo_estado=payload.estado,
+			motivo=payload.motivo,
+			realizado_por=realizado_por,
+		)
 	except ValueError as exc:
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST

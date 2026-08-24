@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class NotificacionCreate(BaseModel):
@@ -15,7 +15,10 @@ class NotificacionCreate(BaseModel):
 
 
 class NotificacionResponse(BaseModel):
-	notif_id: UUID
+	notif_id: UUID = Field(
+		validation_alias=AliasChoices("notif_id", "notificacion_id"),
+		serialization_alias="notificacion_id",
+	)
 	medico_id: UUID
 	tipo: str
 	titulo: str

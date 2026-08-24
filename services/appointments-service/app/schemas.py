@@ -165,6 +165,33 @@ class CancelarCitaRequest(BaseModel):
 		return value or None
 
 
+class CambioEstadoRequest(BaseModel):
+	"""Payload para cambiar el estado de una cita desde el portal medico."""
+
+	estado: str
+	motivo: str | None = Field(default=None, max_length=1000)
+
+	@field_validator("estado")
+	@classmethod
+	def validar_estado(cls, value: str) -> str:
+		"""Normaliza y valida el nuevo estado contra el dominio permitido."""
+		value = value.strip().lower()
+		if value not in ESTADOS_CITA_VALIDOS:
+			raise ValueError(
+				"estado invalido. Valores permitidos: programada, cancelada, atendida, no_asistio"
+			)
+		return value
+
+	@field_validator("motivo")
+	@classmethod
+	def validar_motivo(cls, value: str | None) -> str | None:
+		"""Normaliza el motivo para evitar cadenas vacias."""
+		if value is None:
+			return None
+		value = value.strip()
+		return value or None
+
+
 class ReprogramarCitaRequest(BaseModel):
 	"""Payload para reprogramar fecha y horario de una cita."""
 
