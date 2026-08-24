@@ -88,6 +88,13 @@ export const citasApi = {
     citasClient.get(`/citas/usuario/${userId}/historial`),
   cancel: (citaId: string, motivo: string) =>
     citasClient.post(`/citas/${citaId}/cancelar`, { motivo }),
+  getSlotsDisponibles: (params: {
+    medico_id?: string;
+    servicio_id?: string;
+    especialidad_id?: string;
+    fecha: string;
+  }) =>
+    citasClient.get('/citas/slots-disponibles', { params }),
   getCitasMedico: (medicoId: string, filters?: { fecha?: string; fecha_inicio?: string; fecha_fin?: string }) =>
     citasClient.get(`/citas/medico/${medicoId}`, { params: filters }),
   getMetricasMedico: (medicoId: string) =>

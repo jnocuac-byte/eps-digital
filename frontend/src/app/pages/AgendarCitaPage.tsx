@@ -1,19 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ArrowLeft, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../stores/authStore';
 import { catalogoApi, citasApi } from '../lib/apiClient';
-import type { Servicio, Especialidad, Medico, Sede, Disponibilidad } from '../types';
+import type { Servicio, Especialidad, Medico, Sede } from '../types';
 
 const SEDE_DEFAULT = "4bf0500a-e23a-4f57-a8e8-ce4c20223695";
 
-const HORAS = [
-  '07:00 AM', '07:30 AM', '08:00 AM', '08:30 AM', '09:00 AM', '09:30 AM',
-  '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '02:00 PM', '02:30 PM',
-  '03:00 PM', '03:30 PM', '04:00 PM', '04:30 PM', '05:00 PM',
-];
+// Formatea una Date local a YYYY-MM-DD sin desfase de zona horaria.
+const toISODate = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 const DIAS = ['D', 'L', 'M', 'Mi', 'J', 'V', 'S'];
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -86,17 +84,10 @@ export default function AgendarCitaPage() {
   const [hora, setHora] = useState('');
   const [sintomas, setSintomas] = useState('');
   const [sedeId, setSedeId] = useState(SEDE_DEFAULT);
-  const [horasDisponibles, setHorasDisponibles] = useState<string[]>(HORAS);
 
   const { data: sedes = [] } = useQuery<Sede[]>({
     queryKey: ['sedes'],
     queryFn: () => catalogoApi.getSedes().then((r) => r.data),
-  });
-
-  const { data: disponibilidades = [] } = useQuery<Disponibilidad[]>({
-    queryKey: ['disponibilidades', medicoId],
-    queryFn: () => catalogoApi.getDisponibilidadesMedico(medicoId).then((r) => r.data),
-    enabled: !!medicoId,
   });
 
   const { data: servicios = [] } = useQuery<Servicio[]>({
@@ -121,53 +112,31 @@ export default function AgendarCitaPage() {
 
   useEffect(() => { setEspecialidadId(''); setMedicoId(''); }, [servicioId]);
   useEffect(() => { setMedicoId(''); }, [especialidadId]);
+  useEffect(() => { setHora(''); }, [medicoId, especialidadId, fecha]);
 
-  useEffect(() => {
-    if (!medicoId || !fecha || disponibilidades.length === 0) {
-      setHorasDisponibles(HORAS);
-      return;
-    }
+  // Franjas horarias calculadas y validadas por el backend (America/Bogota).
+  const fechaISO = fecha ? toISODate(fecha) : '';
+  const tieneFiltrosSlot = !!medicoId || !!especialidadId || !!servicioId;
 
-    const diaSemana = fecha.getDay() === 0 ? 7 : fecha.getDay();
-    const disponibilidadesDia = disponibilidades.filter(d => d.dia_semana === diaSemana);
+  const { data: slots = [], isLoading: isLoadingSlots } = useQuery<
+    { hora_inicio: string; hora_fin: string }[]
+  >({
+    queryKey: ['slots', medicoId, especialidadId, servicioId, fechaISO],
+    queryFn: () =>
+      citasApi
+        .getSlotsDisponibles({
+          medico_id: medicoId || undefined,
+          especialidad_id: especialidadId || undefined,
+          servicio_id: servicioId || undefined,
+          fecha: fechaISO,
+        })
+        .then((r) => r.data),
+    enabled: !!fechaISO && tieneFiltrosSlot,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
 
-    if (disponibilidadesDia.length === 0) {
-      setHorasDisponibles([]);
-      return;
-    }
-
-    const horas: string[] = [];
-    disponibilidadesDia.forEach(disp => {
-      const horaInicio = disp.hora_inicio.substring(0, 5);
-      const horaFin = disp.hora_fin.substring(0, 5);
-
-      let [h, m] = horaInicio.split(':').map(Number);
-      const [hFin] = horaFin.split(':').map(Number);
-
-      while (h < hFin) {
-        const period = h >= 12 ? 'PM' : 'AM';
-        const h12 = h === 0 ? 12 : (h > 12 ? h - 12 : h);
-        horas.push(`${h12}:${m.toString().padStart(2, '0')} ${period}`);
-
-        m += 30;
-        if (m >= 60) {
-          h += 1;
-          m = 0;
-        }
-      }
-    });
-
-    const uniqueHoras = [...new Set(horas)].sort((a, b) => {
-      const [timeA, periodA] = a.split(' ');
-      const [timeB, periodB] = b.split(' ');
-      const [hA, mA] = timeA.split(':').map(Number);
-      const [hB, mB] = timeB.split(':').map(Number);
-      const adjA = periodA === 'PM' && hA !== 12 ? hA + 12 : hA;
-      const adjB = periodB === 'PM' && hB !== 12 ? hB + 12 : hB;
-      return adjA * 60 + mA - (adjB * 60 + mB);
-    });
-    setHorasDisponibles(uniqueHoras);
-  }, [medicoId, fecha, disponibilidades]);
+  const horasDisponibles = slots.map((s) => s.hora_inicio);
 
   const mapTipoServicio = (nombre: string): string => {
     const lower = nombre.toLowerCase();
@@ -178,15 +147,8 @@ export default function AgendarCitaPage() {
     return 'especialista'; // valor por defecto
   };
 
-  const convertToTimeFormat = (horaStr: string): string => {
-    if (!horaStr) return '';
-    const [time, period] = horaStr.split(' ');
-    let [hours, minutes] = time.split(':');
-    let h = parseInt(hours, 10);
-    if (period === 'PM' && h !== 12) h += 12;
-    if (period === 'AM' && h === 12) h = 0;
-    return `${h.toString().padStart(2, '0')}:${minutes}:00`;
-  };
+  // Los slots llegan en formato HH:MM (24h); se convierten a HH:MM:00 para el backend.
+  const convertToTimeFormat = (horaStr: string): string => (horaStr ? `${horaStr}:00` : '');
 
   const selectedEspecialidad = especialidades.find((e) => e.especialidad_id === especialidadId);
   const duracionMinutos = selectedEspecialidad?.duracion_cita_minutos || 20;
@@ -206,7 +168,7 @@ export default function AgendarCitaPage() {
         medico_id: medicoId || undefined,
         especialidad_id: especialidadId || undefined,
         tipo_servicio: mapTipoServicio(selectedServicio?.nombre || ''),
-        fecha_cita: fecha?.toISOString().split('T')[0],
+        fecha_cita: fecha ? toISODate(fecha) : '',
         hora_inicio: convertToTimeFormat(hora),
         hora_fin: sumarMinutos(convertToTimeFormat(hora), duracionMinutos),
         sede_id: sedeId,
@@ -311,18 +273,21 @@ export default function AgendarCitaPage() {
                 <select
                   value={hora}
                   onChange={(e) => setHora(e.target.value)}
-                  disabled={horasDisponibles.length === 0}
+                  disabled={isLoadingSlots || horasDisponibles.length === 0}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] disabled:bg-gray-100 disabled:text-gray-500"
                 >
-                  <option value="">Seleccionar hora...</option>
-                  {horasDisponibles.length === 0 ? (
-                    <option disabled>No hay horarios disponibles</option>
-                  ) : (
-                    horasDisponibles.map((h) => (
-                      <option key={h} value={h}>{h}</option>
-                    ))
-                  )}
+                  <option value="">
+                    {isLoadingSlots ? 'Cargando horarios...' : 'Seleccionar hora...'}
+                  </option>
+                  {horasDisponibles.map((h) => (
+                    <option key={h} value={h}>{h}</option>
+                  ))}
                 </select>
+                {!isLoadingSlots && fechaISO && tieneFiltrosSlot && horasDisponibles.length === 0 && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    No hay horarios disponibles para esta fecha. Prueba con otro día o médico.
+                  </p>
+                )}
               </div>
 
               {/* Sede */}

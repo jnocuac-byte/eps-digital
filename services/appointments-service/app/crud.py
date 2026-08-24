@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy import and_, select
@@ -21,15 +22,27 @@ TIPO_SERVICIO_A_SERVICIO = {
 	"laboratorio": "Laboratorio",
 }
 
+# Zona horaria oficial de operacion (las reglas de anticipacion se calculan aqui).
+ZONA_BOGOTA = ZoneInfo("America/Bogota")
+# Anticipacion minima exigida para citas el mismo dia.
+ANTELACION_MINIMA_MINUTOS = 60
+# Duracion por defecto cuando la especialidad no informa duracion_cita_minutos.
+DURACION_FALLBACK_MINUTOS = 20
+
 
 def _obtener_medico_automatico(
+	db: Session,
 	tipo_servicio: str,
 	especialidad_id: UUID | None,
 	fecha_cita: date,
 	hora_inicio: time,
 	hora_fin: time,
 ) -> UUID | None:
-	"""Obtiene un medico disponible automaticamente (Round Robin)."""
+	"""Obtiene un medico disponible automaticamente.
+
+	Itera los medicos que cubren el horario segun catalog-service y devuelve
+	el primero sin citas ya reservadas en eps_citas (evita 400 por cruce).
+	"""
 	servicio_nombre = TIPO_SERVICIO_A_SERVICIO.get(tipo_servicio)
 	if not servicio_nombre:
 		return None
@@ -68,8 +81,19 @@ def _obtener_medico_automatico(
 			if resp_medicos.status_code != 200:
 				return None
 			medicos = resp_medicos.json()
-			if medicos:
-				return UUID(medicos[0]["medico_id"])
+			for item in medicos:
+				try:
+					candidato = UUID(item["medico_id"])
+				except (KeyError, TypeError, ValueError):
+					continue
+				if not es_horario_ocupado(
+					db=db,
+					medico_id=candidato,
+					fecha=fecha_cita,
+					hora_inicio=hora_inicio,
+					hora_fin=hora_fin,
+				):
+					return candidato
 	except Exception:
 		return None
 	return None
@@ -78,6 +102,111 @@ def _obtener_medico_automatico(
 def utc_now() -> datetime:
 	"""Retorna fecha/hora actual en UTC con timezone-aware."""
 	return datetime.now(timezone.utc)
+
+
+def hoy_bogota() -> date:
+	"""Fecha actual en la zona horaria de operacion (America/Bogota)."""
+	return datetime.now(ZONA_BOGOTA).date()
+
+
+def ahora_bogota() -> datetime:
+	"""Fecha/hora actual en la zona horaria de operacion (America/Bogota)."""
+	return datetime.now(ZONA_BOGOTA)
+
+
+def _validar_fecha_futura(fecha_cita: date, hora_inicio: time) -> None:
+	"""Rechaza fechas pasadas y horas sin la anticipacion minima para el mismo dia."""
+	hoy = hoy_bogota()
+	if fecha_cita < hoy:
+		raise ValueError("No se pueden agendar citas en fechas pasadas")
+	if fecha_cita == hoy:
+		limite = (ahora_bogota() + timedelta(minutes=ANTELACION_MINIMA_MINUTOS)).time()
+		if hora_inicio < limite:
+			raise ValueError(
+				"Las citas para el dia de hoy requieren al menos "
+				f"{ANTELACION_MINIMA_MINUTOS} minutos de anticipacion"
+			)
+
+
+def _obtener_duracion_especialidad(especialidad_id: UUID | None) -> int:
+	"""Consulta duracion_cita_minutos en catalog-service con fallback configurable."""
+	if especialidad_id is None:
+		return DURACION_FALLBACK_MINUTOS
+	try:
+		with httpx.Client(timeout=10.0) as client:
+			resp = client.get(f"{CATALOG_SERVICE_URL}/especialidades/{especialidad_id}")
+		if resp.status_code != 200:
+			return DURACION_FALLBACK_MINUTOS
+		duracion = int(resp.json().get("duracion_cita_minutos") or DURACION_FALLBACK_MINUTOS)
+	except Exception:
+		return DURACION_FALLBACK_MINUTOS
+	return max(1, min(duracion, 240))
+
+
+def _obtener_disponibilidades_medico(medico_id: UUID, dia_semana: int) -> list[dict]:
+	"""Trae los turnos activos de un medico para un dia de semana ISO (1-7)."""
+	try:
+		with httpx.Client(timeout=10.0) as client:
+			resp = client.get(
+				f"{CATALOG_SERVICE_URL}/disponibilidades/medico/{medico_id}",
+				params={"dia_semana": dia_semana},
+			)
+		if resp.status_code != 200:
+			return []
+		data = resp.json()
+	except Exception:
+		return []
+	return [t for t in data if isinstance(t, dict) and t.get("activo", False)]
+
+
+def _iterar_slots(
+	turno_inicio: time,
+	turno_fin: time,
+	duracion_minutos: int,
+	fecha: date,
+) -> list[tuple[time, time]]:
+	"""Genera franjas consecutivas de duracion_minutos dentro de un turno."""
+	base = datetime.combine(fecha, turno_inicio)
+	fin_dt = datetime.combine(fecha, turno_fin)
+	slots: list[tuple[time, time]] = []
+	cursor = base
+	while cursor + timedelta(minutes=duracion_minutos) <= fin_dt:
+		slots.append((cursor.time(), (cursor + timedelta(minutes=duracion_minutos)).time()))
+		cursor += timedelta(minutes=duracion_minutos)
+	return slots
+
+
+def _resolver_medicos_candidatos(
+	fecha: date,
+	medico_id: UUID | None = None,
+	servicio_id: UUID | None = None,
+	especialidad_id: UUID | None = None,
+) -> list[UUID]:
+	"""Resuelve medicos candidatos: el elegido o los auto-asignables para la fecha."""
+	if medico_id is not None:
+		return [medico_id]
+	try:
+		params: dict[str, str] = {"fecha": str(fecha)}
+		if servicio_id is not None:
+			params["servicio_id"] = str(servicio_id)
+		if especialidad_id is not None:
+			params["especialidad_id"] = str(especialidad_id)
+		with httpx.Client(timeout=10.0) as client:
+			resp = client.get(
+				f"{CATALOG_SERVICE_URL}/medicos/disponibles",
+				params=params,
+			)
+		if resp.status_code != 200:
+			return []
+		candidatos: list[UUID] = []
+		for item in resp.json():
+			try:
+				candidatos.append(UUID(item["medico_id"]))
+			except (KeyError, TypeError, ValueError):
+				continue
+		return candidatos
+	except Exception:
+		return []
 
 
 def es_horario_ocupado(
@@ -105,11 +234,14 @@ def es_horario_ocupado(
 
 
 def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
-	"""Crea una cita validando disponibilidad horaria del medico."""
+	"""Crea una cita validando fecha futura y disponibilidad horaria del medico."""
+	_validar_fecha_futura(cita_data.fecha_cita, cita_data.hora_inicio)
+
 	medico_id = cita_data.medico_id
 
 	if medico_id is None:
 		medico_id = _obtener_medico_automatico(
+			db=db,
 			tipo_servicio=cita_data.tipo_servicio,
 			especialidad_id=cita_data.especialidad_id,
 			fecha_cita=cita_data.fecha_cita,
@@ -565,3 +697,74 @@ def get_metricas_medico(db: Session, medico_id: UUID) -> dict:
 		"tasa_asistencia_pct": tasa_asistencia,
 		"ingresos_mes": 0,
 	}
+
+
+def generar_slots_disponibles(
+	db: Session,
+	fecha: date,
+	medico_id: UUID | None = None,
+	servicio_id: UUID | None = None,
+	especialidad_id: UUID | None = None,
+) -> list[dict[str, str]]:
+	"""Calcula las franjas horarias disponibles para agendar una cita.
+
+	Slots disponibles = turnos del medico (catalog-service)
+	                    - citas programadas que se solapen (eps_citas)
+	                    - franjas sin anticipacion minima si la fecha es hoy
+	                      (America/Bogota). Fechas pasadas retornan [].
+	"""
+	if fecha < hoy_bogota():
+		return []
+
+	if medico_id is None and servicio_id is None and especialidad_id is None:
+		raise ValueError("Se requiere medico_id, servicio_id o especialidad_id para consultar disponibilidad")
+
+	duracion = _obtener_duracion_especialidad(especialidad_id)
+	candidatos = _resolver_medicos_candidatos(fecha, medico_id, servicio_id, especialidad_id)
+	if not candidatos:
+		return []
+
+	dia_semana = fecha.isoweekday()
+
+	stmt = select(Cita).where(
+		Cita.medico_id.in_(candidatos),
+		Cita.fecha_cita == fecha,
+		Cita.estado == "programada",
+	)
+	ocupadas: dict[UUID, list[Cita]] = {}
+	for cita in db.scalars(stmt).all():
+		ocupadas.setdefault(cita.medico_id, []).append(cita)
+
+	def _solapa(inicio: time, fin: time, cita: Cita) -> bool:
+		return cita.hora_inicio < fin and cita.hora_fin > inicio
+
+	limite_hoy: time | None = None
+	if fecha == hoy_bogota():
+		limite_hoy = (ahora_bogota() + timedelta(minutes=ANTELACION_MINIMA_MINUTOS)).time()
+
+	slots_por_hora: dict[time, time] = {}
+
+	for medico in candidatos:
+		citas_medico = ocupadas.get(medico, [])
+		for turno in _obtener_disponibilidades_medico(medico, dia_semana):
+			try:
+				turno_inicio = time.fromisoformat(str(turno.get("hora_inicio"))[:8])
+				turno_fin = time.fromisoformat(str(turno.get("hora_fin"))[:8])
+			except ValueError:
+				continue
+			if turno_fin <= turno_inicio:
+				continue
+			for slot_inicio, slot_fin in _iterar_slots(turno_inicio, turno_fin, duracion, fecha):
+				if any(_solapa(slot_inicio, slot_fin, c) for c in citas_medico):
+					continue
+				if limite_hoy is not None and slot_inicio < limite_hoy:
+					continue
+				slots_por_hora.setdefault(slot_inicio, slot_fin)
+
+	return [
+		{
+			"hora_inicio": inicio.strftime("%H:%M"),
+			"hora_fin": slots_por_hora[inicio].strftime("%H:%M"),
+		}
+		for inicio in sorted(slots_por_hora)
+	]

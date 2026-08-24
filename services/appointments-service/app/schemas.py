@@ -178,3 +178,10 @@ class ReprogramarCitaRequest(BaseModel):
 		if self.nueva_hora_fin <= self.nueva_hora_inicio:
 			raise ValueError("nueva_hora_fin debe ser mayor que nueva_hora_inicio")
 		return self
+
+
+class SlotDisponible(BaseModel):
+	"""Franja horaria disponible para agendar una cita (formato HH:MM 24h)."""
+
+	hora_inicio: str
+	hora_fin: str

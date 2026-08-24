@@ -15,6 +15,7 @@ from app.crud import (
 	create_cita,
 	create_recordatorio,
 	delete_cita,
+	generar_slots_disponibles,
 	get_cita_by_id,
 	get_citas_by_estado,
 	get_citas_by_medico,
@@ -37,6 +38,7 @@ from app.schemas import (
 	HistorialEstadoResponse,
 	RecordatorioResponse,
 	ReprogramarCitaRequest,
+	SlotDisponible,
 )
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -160,6 +162,46 @@ def listar_citas_por_estado(
 	return get_citas_by_estado(db, estado_normalizado, skip=skip, limit=limit)
 
 
+@app.get("/citas/slots-disponibles", response_model=list[SlotDisponible], tags=["citas"])
+def listar_slots_disponibles(
+	fecha: date = Query(...),
+	medico_id: UUID | None = Query(default=None),
+	servicio_id: UUID | None = Query(default=None),
+	especialidad_id: UUID | None = Query(default=None),
+	db: Session = Depends(get_db),
+) -> list[SlotDisponible]:
+	"""Franjas horarias disponibles para agendar (reglas en America/Bogota)."""
+	try:
+		slots = generar_slots_disponibles(
+			db,
+			fecha=fecha,
+			medico_id=medico_id,
+			servicio_id=servicio_id,
+			especialidad_id=especialidad_id,
+		)
+	except ValueError as exc:
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+	return [SlotDisponible(**slot) for slot in slots]
+
+
+@app.get("/citas/metricas", tags=["admin"])
+def obtener_metricas(
+	dias: int = Query(default=7, ge=1, le=90),
+	db: Session = Depends(get_db),
+) -> dict:
+	"""Obtiene metricas agregadas de citas para dashboard administrativo."""
+	return get_metricas_citas(db, dias=dias)
+
+
+@app.get("/citas/medico/{medico_id}/metricas", tags=["medico"])
+def obtener_metricas_medico(
+	medico_id: UUID,
+	db: Session = Depends(get_db),
+) -> dict:
+	"""Obtiene metricas del dashboard para un medico especifico."""
+	return get_metricas_medico(db, medico_id=medico_id)
+
+
 @app.get("/citas/{cita_id}", response_model=CitaResponse, tags=["citas"])
 def obtener_cita(cita_id: UUID, db: Session = Depends(get_db)) -> CitaResponse:
 	"""Obtiene una cita por su identificador."""
@@ -266,21 +308,3 @@ def crear_recordatorio_cita(cita_id: UUID, db: Session = Depends(get_db)) -> Rec
 def listar_recordatorios_pendientes(db: Session = Depends(get_db)) -> list[RecordatorioResponse]:
 	"""Obtiene recordatorios pendientes de envio hasta el momento actual."""
 	return get_recordatorios_pendientes(db)
-
-
-@app.get("/citas/metricas", tags=["admin"])
-def obtener_metricas(
-	dias: int = Query(default=7, ge=1, le=90),
-	db: Session = Depends(get_db),
-) -> dict:
-	"""Obtiene metricas agregadas de citas para dashboard administrativo."""
-	return get_metricas_citas(db, dias=dias)
-
-
-@app.get("/citas/medico/{medico_id}/metricas", tags=["medico"])
-def obtener_metricas_medico(
-	medico_id: UUID,
-	db: Session = Depends(get_db),
-) -> dict:
-	"""Obtiene metricas del dashboard para un medico especifico."""
-	return get_metricas_medico(db, medico_id=medico_id)
