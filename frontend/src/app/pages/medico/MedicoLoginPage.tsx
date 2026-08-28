@@ -47,7 +47,7 @@ export default function MedicoLoginPage() {
       login(access_token, refresh_token, usuario_id);
 
       if (userRol) {
-        setRol(userRol);
+        setRol(userRol.toLowerCase());
       }
 
       try {
@@ -57,7 +57,7 @@ export default function MedicoLoginPage() {
         // Non-critical
       }
 
-      if (userRol === 'medico') {
+      if (userRol?.toLowerCase() === 'medico') {
         toast.success('¡Bienvenido, Doctor!');
         navigate('/medico/dashboard', { replace: true });
       } else {

@@ -43,7 +43,7 @@ export default function LoginPage() {
       const { access_token, refresh_token, usuario_id, rol: userRol } = res.data;
       login(access_token, refresh_token, usuario_id);
 
-      if (userRol) setRol(userRol);
+      if (userRol) setRol(userRol.toLowerCase());
 
       // Load user profile
       try {
@@ -53,7 +53,7 @@ export default function LoginPage() {
         // Non-critical error
       }
 
-      if (userRol === 'medico') {
+      if (userRol?.toLowerCase() === 'medico') {
         toast.success('¡Bienvenido, Doctor!');
         navigate('/medico/dashboard', { replace: true });
       } else {
