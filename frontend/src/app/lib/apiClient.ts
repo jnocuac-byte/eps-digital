@@ -47,7 +47,7 @@ function createClient(baseURL: string, requiresAuth = false) {
   return client;
 }
 
-export const authClient = createClient(BASE_URLS.auth);
+export const authClient = createClient(BASE_URLS.auth, true);
 export const userClient = createClient(BASE_URLS.user, true);
 export const citasClient = createClient(BASE_URLS.citas, true);
 export const catalogoClient = createClient(BASE_URLS.catalogo, true);
