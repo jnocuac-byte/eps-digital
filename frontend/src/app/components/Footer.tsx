@@ -29,6 +29,7 @@ export function Footer() {
               <li><Link to="/servicios" className="hover:text-white transition-colors">Servicios</Link></li>
               <li><Link to="/ayuda" className="hover:text-white transition-colors">Ayuda</Link></li>
               <li><Link to="/citas/agendar" className="hover:text-white transition-colors">Agendar Cita</Link></li>
+              <li><Link to="/medico/login" className="hover:text-white transition-colors">Portal Médico</Link></li>
             </ul>
           </div>
 

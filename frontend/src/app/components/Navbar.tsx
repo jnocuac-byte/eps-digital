@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router';
 import {
   HeartPulse, Menu, X, Calendar, Clock, RotateCcw, History,
-  ChevronDown, LogOut, User, Stethoscope
+  ChevronDown, LogOut, User
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 
@@ -45,7 +45,6 @@ export function Navbar() {
 
   const navLinks = [
     { to: '/', label: 'Inicio' },
-    { to: '/medico/login', label: 'Portal Médico', icon: <Stethoscope size={14} />, publicOnly: true },
     { to: '/perfil', label: 'Mi Perfil', private: true },
     { to: '/asistente', label: 'Asistente Virtual', private: true },
     { to: '/servicios', label: 'Servicios' },
