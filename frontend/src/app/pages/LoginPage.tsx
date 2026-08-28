@@ -25,7 +25,7 @@ export default function LoginPage() {
   const [apiError, setApiError] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, setUser } = useAuthStore();
+  const { login, setUser, setRol } = useAuthStore();
 
   const {
     register,
@@ -40,8 +40,10 @@ export default function LoginPage() {
     setApiError('');
     try {
       const res = await authApi.login(data);
-      const { access_token, refresh_token, usuario_id } = res.data;
+      const { access_token, refresh_token, usuario_id, rol: userRol } = res.data;
       login(access_token, refresh_token, usuario_id);
+
+      if (userRol) setRol(userRol);
 
       // Load user profile
       try {
@@ -51,8 +53,13 @@ export default function LoginPage() {
         // Non-critical error
       }
 
-      toast.success('¡Bienvenido!');
-      navigate(from, { replace: true });
+      if (userRol === 'medico') {
+        toast.success('¡Bienvenido, Doctor!');
+        navigate('/medico/dashboard', { replace: true });
+      } else {
+        toast.success('¡Bienvenido!');
+        navigate(from, { replace: true });
+      }
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string; message?: string } } };
       const msg =
