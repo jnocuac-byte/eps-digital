@@ -14,6 +14,7 @@ from app.models import Cita, HistorialEstado, Recordatorio
 from app.schemas import CitaCreate, CitaUpdate
 
 CATALOG_SERVICE_URL = os.getenv("CATALOG_SERVICE_URL", "http://localhost:8004")
+NOTIFICATIONS_SERVICE_URL = os.getenv("NOTIFICATIONS_SERVICE_URL", "http://localhost:8006")
 
 TIPO_SERVICIO_A_SERVICIO = {
 	"medicina_general": "Medicina General",
@@ -233,6 +234,28 @@ def es_horario_ocupado(
 	return db.scalar(stmt) is not None
 
 
+def _crear_notificacion_medico(
+	medico_id: UUID,
+	tipo: str,
+	titulo: str,
+	descripcion: str,
+) -> None:
+	"""Inserta una notificacion interna en notifications-service (HTTP POST)."""
+	try:
+		with httpx.Client(timeout=5.0) as client:
+			client.post(
+				f"{NOTIFICATIONS_SERVICE_URL}/notificaciones",
+				json={
+					"medico_id": str(medico_id),
+					"tipo": tipo,
+					"titulo": titulo,
+					"descripcion": descripcion,
+				},
+			)
+	except Exception:
+		pass
+
+
 def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 	"""Crea una cita validando fecha futura y disponibilidad horaria del medico."""
 	_validar_fecha_futura(cita_data.fecha_cita, cita_data.hora_inicio)
@@ -274,6 +297,14 @@ def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 		raise ValueError(f"No se pudo crear la cita: {exc}") from exc
 
 	db.refresh(nueva_cita)
+
+	_crear_notificacion_medico(
+		medico_id=nueva_cita.medico_id,
+		tipo="cita_nueva",
+		titulo="Nueva cita agendada",
+		descripcion=f"Cita programada para el {nueva_cita.fecha_cita} a las {nueva_cita.hora_inicio}",
+	)
+
 	return nueva_cita
 
 

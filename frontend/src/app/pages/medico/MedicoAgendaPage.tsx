@@ -1,5 +1,10 @@
-import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, Calendar, Clock, User } from 'lucide-react';
+import { authApi, citasApi } from '../../lib/apiClient';
+import { parseFechaLocal, toISODateLocal } from '../../lib/fechas';
+import { useAuthStore } from '../../stores/authStore';
+import type { Cita } from '../../types';
 
 const DIAS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const MESES = [
@@ -7,15 +12,54 @@ const MESES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
 ];
 
+const estadoColor: Record<string, string> = {
+  programada: 'bg-blue-50 text-blue-700',
+  cancelada: 'bg-red-50 text-red-700',
+  atendida: 'bg-green-50 text-green-700',
+  no_asistio: 'bg-yellow-50 text-yellow-700',
+};
+
 export default function MedicoAgendaPage() {
+  const { medicoId, setMedicoId } = useAuthStore();
   const [mesActual, setMesActual] = useState(new Date());
   const [diaSeleccionado, setDiaSeleccionado] = useState<Date | null>(null);
+
+  useEffect(() => {
+    if (!medicoId) {
+      authApi.getMedicoId().then((res) => {
+        setMedicoId(res.data.medico_id);
+      }).catch(() => {});
+    }
+  }, [medicoId, setMedicoId]);
 
   const year = mesActual.getFullYear();
   const month = mesActual.getMonth();
   const primerDia = new Date(year, month, 1).getDay();
   const diasEnMes = new Date(year, month + 1, 0).getDate();
   const offset = (primerDia + 6) % 7;
+
+  const fechaInicio = toISODateLocal(new Date(year, month, 1));
+  const fechaFin = toISODateLocal(new Date(year, month + 1, 0));
+
+  const { data: citasMes = [] } = useQuery<Cita[]>({
+    queryKey: ['citas-medico-agenda', medicoId, fechaInicio, fechaFin],
+    queryFn: async () => {
+      if (!medicoId) return [];
+      const res = await citasApi.getCitasMedico(medicoId, { fecha_inicio: fechaInicio, fecha_fin: fechaFin });
+      return res.data;
+    },
+    enabled: !!medicoId,
+  } as any);
+
+  const citasPorDia = useMemo(() => {
+    const map: Record<number, Cita[]> = {};
+    for (const c of citasMes) {
+      const d = parseFechaLocal(c.fecha_cita).getDate();
+      if (!map[d]) map[d] = [];
+      map[d].push(c);
+    }
+    return map;
+  }, [citasMes]);
 
   const dias: (number | null)[] = [];
   for (let i = 0; i < offset; i++) dias.push(null);
@@ -25,6 +69,7 @@ export default function MedicoAgendaPage() {
     const d = new Date(mesActual);
     d.setMonth(d.getMonth() + delta);
     setMesActual(d);
+    setDiaSeleccionado(null);
   };
 
   const hoy = new Date();
@@ -35,6 +80,10 @@ export default function MedicoAgendaPage() {
     diaSeleccionado?.getDate() === dia &&
     diaSeleccionado?.getMonth() === month &&
     diaSeleccionado?.getFullYear() === year;
+
+  const citasDelDia = diaSeleccionado
+    ? citasPorDia[diaSeleccionado.getDate()] ?? []
+    : [];
 
   return (
     <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8">
@@ -67,23 +116,31 @@ export default function MedicoAgendaPage() {
               {d}
             </div>
           ))}
-          {dias.map((dia, i) => (
-            <div
-              key={i}
-              onClick={() => dia && setDiaSeleccionado(new Date(year, month, dia))}
-              className={`aspect-square flex flex-col items-center justify-center rounded-lg text-sm cursor-pointer transition-colors ${
-                dia === null
-                  ? ''
-                  : esHoy(dia)
-                  ? 'bg-[#2B3E59] text-white font-semibold'
-                  : seleccionado(dia)
-                  ? 'bg-blue-100 text-[#2B3E59] font-semibold'
-                  : 'hover:bg-gray-100 text-gray-700'
-              }`}
-            >
-              {dia}
-            </div>
-          ))}
+          {dias.map((dia, i) => {
+            const tieneCitas = dia !== null && (citasPorDia[dia]?.length ?? 0) > 0;
+            return (
+              <div
+                key={i}
+                onClick={() => dia && setDiaSeleccionado(new Date(year, month, dia))}
+                className={`aspect-square flex flex-col items-center justify-center rounded-lg text-sm cursor-pointer transition-colors ${
+                  dia === null
+                    ? ''
+                    : esHoy(dia)
+                    ? 'bg-[#2B3E59] text-white font-semibold'
+                    : seleccionado(dia)
+                    ? 'bg-blue-100 text-[#2B3E59] font-semibold'
+                    : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                {dia}
+                {tieneCitas && dia !== null && (
+                  <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
+                    esHoy(dia) ? 'bg-white' : 'bg-blue-500'
+                  }`} />
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -95,7 +152,35 @@ export default function MedicoAgendaPage() {
               {diaSeleccionado.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
             </h3>
           </div>
-          <p className="text-gray-500 text-sm">Sin citas programadas para este día</p>
+          {citasDelDia.length > 0 ? (
+            <div className="divide-y divide-gray-50">
+              {citasDelDia.map((c) => (
+                <div key={c.cita_id} className="py-3 flex items-start gap-3">
+                  <div className="flex-shrink-0 mt-0.5">
+                    <Clock size={14} className="text-[#2B3E59]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-800">
+                        {c.hora_inicio} – {c.hora_fin}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${estadoColor[c.estado] ?? 'bg-gray-50 text-gray-600'}`}>
+                        {c.estado.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-0.5">
+                      {c.especialidad_nombre ?? c.tipo_servicio}
+                    </p>
+                    {c.descripcion_sintomas && (
+                      <p className="text-xs text-gray-400 mt-1 italic">"{c.descripcion_sintomas}"</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-400 text-sm">Sin citas programadas para este día</p>
+          )}
         </div>
       )}
     </div>
