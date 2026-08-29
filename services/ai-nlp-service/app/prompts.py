@@ -82,7 +82,7 @@ NO conversas con el usuario, NO redactas respuestas. Solo devuelves JSON.
 
 Devuelve SOLO un JSON valido con esta estructura exacta:
 {
-  "evento": "iniciar_agendamiento|avanzar|retroceder_un_paso|cancelar_todo|respuesta_invalida|no_aplica",
+  "evento": "iniciar_agendamiento|consultar_citas|avanzar|retroceder_un_paso|cancelar_todo|respuesta_invalida|no_aplica",
   "seleccion_texto": "texto o numero que el usuario eligio, o null",
   "fecha": "YYYY-MM-DD o null",
   "hora": "HH:MM en 24h o null"
@@ -92,6 +92,10 @@ Definicion de cada evento:
 - iniciar_agendamiento: SOLO valido si el estado actual es "sin_intencion" y el usuario expresa
   querer agendar una cita o pedir atencion medica (ej. "quiero una cita", "necesito ver un cardiologo",
   "me duele la cabeza y quiero consulta").
+- consultar_citas: SOLO valido si el estado actual es "sin_intencion" y el usuario pregunta por
+  citas YA agendadas (ej. "cuales son mis citas", "que citas tengo", "cuando es mi proxima cita",
+  "muestrame mis citas programadas"). No confundir con iniciar_agendamiento: aqui el usuario quiere
+  VER citas existentes, no crear una nueva.
 - avanzar: el usuario responde con una seleccion valida para el paso actual (elige una opcion de la
   lista mostrada, por numero o nombre; o da fecha/hora si el paso lo pide; o confirma con
   "si"/"confirmo"/"dale"/"ok" en el paso de confirmacion).
@@ -103,11 +107,13 @@ Definicion de cada evento:
   ninguna opcion mostrada (ej. le preguntan la sede y responde con un chiste, o elige una opcion que
   no existe en la lista).
 - no_aplica: el estado actual es "sin_intencion" y el mensaje es charla general no relacionada con
-  agendar una cita (saludos, preguntas informativas, etc).
+  agendar ni consultar una cita (saludos, preguntas informativas, etc).
 
 Reglas:
-- Si el estado actual NO es "sin_intencion", nunca devuelvas "iniciar_agendamiento" ni "no_aplica".
-- Si el estado actual ES "sin_intencion", solo puedes devolver "iniciar_agendamiento" o "no_aplica".
+- Si el estado actual NO es "sin_intencion", nunca devuelvas "iniciar_agendamiento",
+  "consultar_citas" ni "no_aplica".
+- Si el estado actual ES "sin_intencion", solo puedes devolver "iniciar_agendamiento",
+  "consultar_citas" o "no_aplica".
 - seleccion_texto: solo se llena cuando evento es "avanzar" y el paso pide elegir una opcion de una
   lista (especialidad, medico o sede). Copia literalmente lo que escribio el usuario (numero o nombre).
 - fecha y hora: solo se llenan cuando evento es "avanzar" y el paso actual pide fecha/hora. Si el

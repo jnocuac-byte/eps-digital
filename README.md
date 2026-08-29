@@ -241,6 +241,17 @@ docker-compose up -d --build
 # Repetir para cada servicio
 ```
 
+### Poblar el catálogo con datos de prueba
+
+```bash
+psql "postgresql://eps_user:eps_password@localhost:5432/eps_catalogo" \
+  -f services/catalog-service/seed_data.sql
+```
+
+Crea especialidades, médicos, sedes y disponibilidad de prueba (idempotente, se
+puede correr varias veces). Sin esto el chatbot y el formulario de agendado no
+tienen nada para ofrecer.
+
 ### Configurar el Frontend
 
 ```bash
@@ -335,7 +346,7 @@ Cada microservicio expone su documentación interactiva en `/docs`:
 
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
-| POST | `/chat` | Enviar mensaje al asistente |
+| POST | `/chat` | Enviar mensaje al asistente (agenda citas guiado por máquina de estados, o consulta tus citas existentes) |
 | GET | `/chat/conversaciones/{usuario_id}` | Listar conversaciones del usuario |
 | GET | `/chat/conversacion/{conversacion_id}/mensajes` | Obtener mensajes de una conversación |
 | GET | `/chat/clasificacion/{conversacion_id}` | Obtener clasificación de síntomas |

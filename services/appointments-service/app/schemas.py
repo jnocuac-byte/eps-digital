@@ -101,6 +101,12 @@ class CitaResponse(CitaBase):
 	creado_en: datetime
 	actualizado_en: datetime
 
+	# Enriquecidos en tiempo real desde Catalog Service (ver crud.enriquecer_citas).
+	# Quedan en None si el Catalog Service no respondio - nunca rompen el endpoint.
+	especialidad_nombre: str | None = None
+	medico_nombre: str | None = None
+	sede_nombre: str | None = None
+
 	model_config = ConfigDict(from_attributes=True)
 
 	@field_validator("estado")

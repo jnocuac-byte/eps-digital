@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time as time_module
 from datetime import datetime, time
 from typing import Any
 
@@ -10,6 +11,7 @@ import httpx
 from dotenv import load_dotenv
 from groq import Groq
 
+from . import fsm
 from .prompts import CLASIFICACION_PROMPT, EVENTO_FSM_PROMPT, SYSTEM_PROMPT
 
 GROQ_MODEL = "openai/gpt-oss-120b"
@@ -121,6 +123,31 @@ def _obtener_catalog_service_url() -> str | None:
 	return os.getenv("CATALOG_SERVICE_URL")
 
 
+def _get_con_reintento(
+	client: httpx.Client,
+	url: str,
+	params: dict | None = None,
+	headers: dict | None = None,
+	intentos: int = 2,
+) -> httpx.Response:
+	"""GET con un reintento ante timeout/error de conexion transitorio.
+
+	Hace mas resistente al asistente ante caidas momentaneas de un servicio
+	dependiente (deploy en curso, cold start, blip de red) sin exponerle al
+	usuario un error por una falla que se resuelve sola en el segundo intento.
+	"""
+	ultimo_error: Exception | None = None
+	for intento in range(intentos):
+		try:
+			return client.get(url, params=params, headers=headers)
+		except (httpx.TimeoutException, httpx.ConnectError) as exc:
+			ultimo_error = exc
+			if intento < intentos - 1:
+				logger.warning(f"Reintentando GET {url} tras error transitorio: {exc}")
+				time_module.sleep(0.4)
+	raise ultimo_error  # type: ignore[misc]
+
+
 def _consultar_catalog_service(endpoint: str, params: dict | None = None) -> dict[str, Any]:
 	"""Consulta al Catalog Service y retorna los datos."""
 	catalog_url = _obtener_catalog_service_url()
@@ -138,10 +165,7 @@ def _consultar_catalog_service(endpoint: str, params: dict | None = None) -> dic
 			url = f"{catalog_url}{endpoint}"
 			logger.info(f"Consultando catalog service: {url} with params {params}")
 
-			if params:
-				response = client.get(url, params=params, headers=headers)
-			else:
-				response = client.get(url, headers=headers)
+			response = _get_con_reintento(client, url, params=params, headers=headers)
 
 			if response.status_code >= 200 and response.status_code < 300:
 				data = response.json()
@@ -161,6 +185,37 @@ def _consultar_catalog_service(endpoint: str, params: dict | None = None) -> dic
 	except Exception as exc:
 		logger.error(f"Error inesperado al consultar catalogo: {exc}")
 		return {"ok": False, "error": "Ocurrió un error inesperado. ¿Querés usar el formulario directo?"}
+
+
+def consultar_citas_del_usuario(usuario_id: str) -> dict[str, Any]:
+	"""Consulta las citas programadas reales del usuario en Citas Service.
+
+	Se usa para responder con datos reales cuando el usuario pregunta por sus
+	citas, en vez de dejar que el LLM improvise una respuesta sin datos.
+	"""
+	citas_url = _obtener_citas_service_url()
+	if not citas_url:
+		return {"ok": False, "error": "CITAS_SERVICE_URL no configurado."}
+
+	try:
+		with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+			response = _get_con_reintento(client, f"{citas_url}/citas/usuario/{usuario_id}")
+
+			if response.status_code >= 200 and response.status_code < 300:
+				return {"ok": True, "citas": response.json()}
+			return {
+				"ok": False,
+				"error": "No pude consultar tus citas en este momento. ¿Querés intentar de nuevo o revisar la seccion 'Ver mis citas'?",
+			}
+	except httpx.TimeoutException:
+		logger.error("Timeout al consultar citas del usuario")
+		return {"ok": False, "error": "La consulta tardó demasiado. ¿Querés intentarlo de nuevo?"}
+	except httpx.RequestError as exc:
+		logger.error(f"Error de conexion al Citas Service (consulta): {exc}")
+		return {"ok": False, "error": "Hubo un problema de conexión. ¿Querés que lo intentemos de nuevo?"}
+	except Exception as exc:
+		logger.error(f"Error inesperado al consultar citas: {exc}")
+		return {"ok": False, "error": "Ocurrió un error inesperado consultando tus citas."}
 
 
 def _obtener_especialidades_del_catalog() -> dict[str, Any]:
@@ -411,10 +466,7 @@ def clasificar_evento_fsm(estado_actual: str, mensaje: str, opciones_mostradas: 
 			return _evento_por_defecto(estado_actual)
 
 		evento = str(parsed.get("evento") or "").strip().lower()
-		if evento not in {
-			"iniciar_agendamiento", "avanzar", "retroceder_un_paso",
-			"cancelar_todo", "respuesta_invalida", "no_aplica",
-		}:
+		if evento not in fsm.EVENTOS_VALIDOS:
 			evento = _evento_por_defecto(estado_actual)["evento"]
 
 		seleccion_texto = parsed.get("seleccion_texto")

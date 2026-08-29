@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
@@ -11,7 +12,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Cita, HistorialEstado, Recordatorio
-from app.schemas import CitaCreate, CitaUpdate
+from app.schemas import CitaCreate, CitaResponse, CitaUpdate
+
+logger = logging.getLogger(__name__)
 
 CATALOG_SERVICE_URL = os.getenv("CATALOG_SERVICE_URL", "http://localhost:8004")
 NOTIFICATIONS_SERVICE_URL = os.getenv("NOTIFICATIONS_SERVICE_URL", "http://localhost:8006")
@@ -29,6 +32,70 @@ ZONA_BOGOTA = ZoneInfo("America/Bogota")
 ANTELACION_MINIMA_MINUTOS = 60
 # Duracion por defecto cuando la especialidad no informa duracion_cita_minutos.
 DURACION_FALLBACK_MINUTOS = 20
+
+
+def _obtener_catalogo_completo() -> dict[str, dict[str, str]]:
+	"""Trae especialidades, medicos y sedes del Catalog Service para enriquecer citas.
+
+	Devuelve diccionarios id->nombre; si el Catalog Service no responde (caido,
+	timeout, error de red), devuelve diccionarios vacios en vez de propagar la
+	excepcion — enriquecer_citas() nunca debe tumbar el endpoint de citas por una
+	falla de un servicio secundario.
+	"""
+	especialidades: dict[str, str] = {}
+	medicos: dict[str, str] = {}
+	sedes: dict[str, str] = {}
+
+	try:
+		with httpx.Client(timeout=5.0) as client:
+			resp = client.get(f"{CATALOG_SERVICE_URL}/especialidades", params={"solo_activos": False})
+			if resp.status_code == 200:
+				for item in resp.json():
+					especialidades[str(item["especialidad_id"])] = item["nombre"]
+
+			resp = client.get(f"{CATALOG_SERVICE_URL}/medicos", params={"limit": 500})
+			if resp.status_code == 200:
+				for item in resp.json():
+					nombre = f"{item.get('nombres', '')} {item.get('apellidos', '')}".strip()
+					medicos[str(item["medico_id"])] = nombre
+
+			resp = client.get(f"{CATALOG_SERVICE_URL}/sedes", params={"limit": 500})
+			if resp.status_code == 200:
+				for item in resp.json():
+					sedes[str(item["sede_id"])] = item["nombre"]
+	except Exception as exc:
+		logger.warning(f"No se pudo enriquecer citas con datos de catalogo: {exc}")
+
+	return {"especialidades": especialidades, "medicos": medicos, "sedes": sedes}
+
+
+def enriquecer_citas(citas: list[Cita]) -> list[dict]:
+	"""Adjunta especialidad_nombre/medico_nombre/sede_nombre a una lista de citas.
+
+	Degradacion suave: si el Catalog Service no responde, las citas se devuelven
+	igual, solo sin los nombres (quedan en None en CitaResponse).
+	"""
+	if not citas:
+		return []
+
+	catalogo = _obtener_catalogo_completo()
+	resultado: list[dict] = []
+	for cita in citas:
+		data = CitaResponse.model_validate(cita).model_dump()
+		data["especialidad_nombre"] = (
+			catalogo["especialidades"].get(str(cita.especialidad_id)) if cita.especialidad_id else None
+		)
+		data["medico_nombre"] = (
+			catalogo["medicos"].get(str(cita.medico_id)) if cita.medico_id else None
+		)
+		data["sede_nombre"] = catalogo["sedes"].get(str(cita.sede_id))
+		resultado.append(data)
+	return resultado
+
+
+def enriquecer_cita(cita: Cita) -> dict:
+	"""Version de una sola cita de enriquecer_citas."""
+	return enriquecer_citas([cita])[0]
 
 
 def _obtener_medico_automatico(

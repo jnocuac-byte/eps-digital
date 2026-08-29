@@ -111,10 +111,15 @@ npm run dev   # http://localhost:5173, ya apunta a localhost:800X automaticament
 ```
 
 Sin datos en `catalog-service` el chatbot no tiene especialidades/medicos/sedes que
-ofrecer — hay que crear al menos una especialidad, un medico (con su
-`medico_especialidades`) y una sede via los endpoints POST de `catalog-service`
-(`/servicios`, `/especialidades`, `/medicos`, `/medicos/{id}/especialidades/{id}`,
-`/sedes`) antes de probar el flujo de agendado.
+ofrecer. Hay un script idempotente listo para esto — `services/catalog-service/seed_data.sql`
+(7 especialidades, 9 medicos, 4 sedes, disponibilidad lunes-viernes 8am-4pm):
+
+```bash
+psql "postgresql://eps_user:eps_password@localhost:5432/eps_catalogo" \
+  -f services/catalog-service/seed_data.sql
+```
+
+Se puede correr varias veces sin duplicar datos (usa `WHERE NOT EXISTS`).
 
 ---
 
@@ -290,6 +295,35 @@ ofrecida, para poder resolver "el 2" o el nombre contra IDs reales).
    message: mandar historial hace que el modelo "repita" su respuesta anterior en vez
    de reaccionar al nuevo estado tras una retractacion.
 
+**Consultar citas existentes** (`consultar_citas`, evento solo valido en `sin_intencion`):
+no es un paso de la FSM de agendado, es una consulta de solo lectura. Llama
+`groq_client.consultar_citas_del_usuario()` (GET real a `{CITAS_SERVICE_URL}/citas/usuario/{id}`)
+y le pasa el resultado real al LLM para que lo redacte — nunca deja que el modelo
+"invente" que citas tiene el usuario.
+
+**Guardas de seguridad**: `iniciar_agendamiento` y `consultar_citas` requieren una
+conversacion con usuario autenticado. El `usuario_id` efectivo se calcula en
+`main.py::post_chat` a partir de `conversacion.usuario_id` (persistido, estable durante
+toda la charla) y NO del `payload.usuario_id` de cada request individual — evita que un
+mensaje que por error no incluya `usuario_id` a mitad de flujo tumbe un agendado que ya
+iba autenticado. Si la conversacion arranco anonima (`usuario_id` = UUID cero), se
+acepta un `usuario_id` en un mensaje posterior como "login tardio" dentro de la misma
+charla. Ver `ANONIMO_UUID` en `main.py`.
+
+**Validacion de fecha/hora** (`fsm.validar_fecha_hora`): antes de aceptar el paso
+`esperando_fecha_hora`, se valida en America/Bogota (mismo criterio que
+appointments-service: no fechas pasadas, 60 min de anticipacion minima el mismo dia).
+Si es invalida, el evento se degrada a `respuesta_invalida` con el motivo especifico
+inyectado al LLM — nunca llega una fecha mala hasta el paso de confirmacion.
+
+**Manejo de fallas de servicios dependientes**: si `catalog-service` no responde (o
+responde pero sin opciones) al pedir la lista de un paso, NO se deja el contexto vacio
+(eso induce al LLM a alucinar opciones) — se le informa explicitamente el error para que
+lo traduzca a lenguaje simple y ofrezca reintentar o usar el formulario. Las llamadas GET
+a catalog/citas-service tienen un reintento automatico ante timeout/error de conexion
+transitorio (`groq_client._get_con_reintento`); el POST de `agendar_cita` NO reintenta
+(evita citas duplicadas si el primer intento si llego a crear la cita).
+
 Endpoints correctos del Catalog Service para las tools:
 - `/especialidades`
 - `/especialidades/{especialidad_id}/medicos` (devuelve `MedicoResponse[]` con datos
@@ -352,8 +386,11 @@ Notas:
 - Tests: carpetas `tests/` por servicio son scripts manuales sin runner; no asumir pytest CI.
 - Cambios de modelo ⇒ migración Alembic en la misma PR, nunca después.
 - Desacoples conocidos aceptados (no "corregir" sin consultar): columna `notif_id`
-  vs `notificacion_id` en frontend; campos `*_nombre` de `Cita` esperados por la UI que el
-  backend aún no retorna.
+  vs `notificacion_id` en frontend.
+  ~~campos `*_nombre` de `Cita` esperados por la UI que el backend aún no retorna~~ —
+  corregido: `appointments-service` ahora enriquece `CitaResponse` con
+  `especialidad_nombre`/`medico_nombre`/`sede_nombre` consultando catalog-service
+  en tiempo real (`crud.enriquecer_citas`, degrada a `None` si catalog-service no responde).
 
 ---
 
@@ -368,7 +405,8 @@ Notas:
 | `frontend/src/app/pages/AgendarCitaPage.tsx` | Flujo de slots y creación de citas |
 | `services/*/app/schemas.py` | Validaciones Pydantic (origen típico de errores 422) |
 | `services/auth-service/app/auth.py` | JWT, bcrypt, bloqueos, 2FA, recuperación |
-| `services/appointments-service/app/crud.py` | Citas, slots, zona horaria Bogotá, métricas |
+| `services/appointments-service/app/crud.py` | Citas, slots, zona horaria Bogotá, métricas, `enriquecer_citas` (nombres de especialidad/médico/sede) |
+| `services/catalog-service/seed_data.sql` | Datos de prueba idempotentes: especialidades, médicos, sedes, disponibilidad |
 | `services/catalog-service/app/crud.py` | Disponibilidad de médicos y borrado lógico |
 | `services/ai-nlp-service/app/groq_client.py` | Cliente Groq, tools del asistente, `clasificar_evento_fsm` |
 | `services/ai-nlp-service/app/fsm.py` | Maquina de estados de agendado: estados, transiciones, invalidacion en retroceso |

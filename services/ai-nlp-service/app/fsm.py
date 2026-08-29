@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
+
+# Misma zona horaria de operacion que appointments-service (ver AGENTS.md: nunca
+# usar date.today()/datetime.now() desnudos para decisiones de negocio de citas).
+ZONA_BOGOTA = ZoneInfo("America/Bogota")
+ANTELACION_MINIMA_MINUTOS = 60
 
 # Estados del flujo de agendado conversacional.
 SIN_INTENCION = "sin_intencion"
@@ -47,12 +54,17 @@ TODOS_LOS_CAMPOS_DEL_BORRADOR = [
 
 EVENTOS_VALIDOS = {
 	"iniciar_agendamiento",
+	"consultar_citas",
 	"avanzar",
 	"retroceder_un_paso",
 	"cancelar_todo",
 	"respuesta_invalida",
 	"no_aplica",
 }
+
+# Eventos que solo tienen sentido si el usuario esta autenticado (usuario_id real,
+# no el UUID cero de sesiones anonimas): agendar y consultar citas propias.
+EVENTOS_QUE_REQUIEREN_USUARIO = {"iniciar_agendamiento", "consultar_citas"}
 
 
 @dataclass
@@ -165,6 +177,45 @@ def tools_permitidas(estado: str) -> list[str]:
 	"""Nombres de tools de catalogo que corresponden al estado (para exponer al LLM)."""
 	tool_entrada = TOOL_DE_ENTRADA.get(estado)
 	return [tool_entrada] if tool_entrada else []
+
+
+def validar_fecha_hora(fecha_str: str, hora_str: str) -> str | None:
+	"""Valida fecha/hora propuestas por el usuario para una cita.
+
+	Retorna None si son validas, o un mensaje de error en espanol listo para
+	mostrar al usuario si no lo son. Usa America/Bogota (nunca datetime.now()
+	desnudo) para ser consistente con las reglas de negocio de appointments-service
+	y no dejar pasar una fecha que luego el servicio de citas rechazaria.
+	"""
+	try:
+		fecha = date.fromisoformat(fecha_str)
+	except (ValueError, TypeError):
+		return "Esa fecha no es valida. ¿Podrías indicarla en formato AAAA-MM-DD?"
+
+	try:
+		hora_partes = hora_str.strip().split(":")
+		hora = int(hora_partes[0])
+		minuto = int(hora_partes[1])
+		if not (0 <= hora <= 23 and 0 <= minuto <= 59):
+			raise ValueError
+	except (ValueError, TypeError, IndexError):
+		return "Esa hora no es valida. ¿Podrías indicarla en formato HH:MM (24 horas)?"
+
+	ahora_bogota = datetime.now(ZONA_BOGOTA)
+	hoy_bogota = ahora_bogota.date()
+
+	if fecha < hoy_bogota:
+		return "No se pueden agendar citas en fechas pasadas. ¿Qué otra fecha te gustaría?"
+
+	if fecha == hoy_bogota:
+		limite = (ahora_bogota + timedelta(minutes=ANTELACION_MINIMA_MINUTOS)).time()
+		if (hora, minuto) < (limite.hour, limite.minute):
+			return (
+				f"Para citas el mismo día se necesitan al menos {ANTELACION_MINIMA_MINUTOS} "
+				"minutos de anticipación. ¿Qué otra hora te gustaría?"
+			)
+
+	return None
 
 
 _INSTRUCCIONES_POR_ESTADO = {

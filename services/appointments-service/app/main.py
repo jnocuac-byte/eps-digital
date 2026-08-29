@@ -16,6 +16,8 @@ from app.crud import (
 	create_cita,
 	create_recordatorio,
 	delete_cita,
+	enriquecer_cita,
+	enriquecer_citas,
 	generar_slots_disponibles,
 	get_cita_by_id,
 	get_citas_by_estado,
@@ -104,12 +106,13 @@ def _parse_user_id_header(x_user_id: str | None) -> UUID:
 
 	
 @app.post("/citas", response_model=CitaResponse, tags=["citas"])
-def crear_cita(payload: CitaCreate, db: Session = Depends(get_db)) -> CitaResponse:
+def crear_cita(payload: CitaCreate, db: Session = Depends(get_db)) -> dict:
 	"""Crea una cita nueva."""
 	try:
-		return create_cita(db, payload)
+		cita = create_cita(db, payload)
 	except ValueError as exc:
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+	return enriquecer_cita(cita)
 
 
 @app.get("/citas/usuario/{usuario_id}", response_model=list[CitaResponse], tags=["citas"])
@@ -118,9 +121,9 @@ def listar_citas_por_usuario(
 	skip: int = Query(default=0, ge=0),
 	limit: int = Query(default=100, ge=1, le=500),
 	db: Session = Depends(get_db),
-) -> list[CitaResponse]:
-	"""Lista las citas de un usuario con paginacion."""
-	return get_citas_by_usuario(db, usuario_id, skip=skip, limit=limit)
+) -> list[dict]:
+	"""Lista las citas de un usuario con paginacion, con nombres de especialidad/medico/sede."""
+	return enriquecer_citas(get_citas_by_usuario(db, usuario_id, skip=skip, limit=limit))
 
 
 @app.get("/citas/usuario/{usuario_id}/historial", response_model=list[CitaResponse], tags=["citas"])
@@ -129,9 +132,9 @@ def listar_citas_historicas(
 	skip: int = Query(default=0, ge=0),
 	limit: int = Query(default=100, ge=1, le=500),
 	db: Session = Depends(get_db),
-) -> list[CitaResponse]:
+) -> list[dict]:
 	"""Lista las citas historicas (canceladas, atendidas, no asistio) de un usuario."""
-	return get_citas_historicas_by_usuario(db, usuario_id, skip=skip, limit=limit)
+	return enriquecer_citas(get_citas_historicas_by_usuario(db, usuario_id, skip=skip, limit=limit))
 
 
 @app.get("/citas/medico/{medico_id}", response_model=list[CitaResponse], tags=["citas"])
@@ -205,12 +208,12 @@ def obtener_metricas_medico(
 
 
 @app.get("/citas/{cita_id}", response_model=CitaResponse, tags=["citas"])
-def obtener_cita(cita_id: UUID, db: Session = Depends(get_db)) -> CitaResponse:
+def obtener_cita(cita_id: UUID, db: Session = Depends(get_db)) -> dict:
 	"""Obtiene una cita por su identificador."""
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cita no encontrada")
-	return cita
+	return enriquecer_cita(cita)
 
 
 @app.put("/citas/{cita_id}", response_model=CitaResponse, tags=["citas"])
@@ -218,14 +221,15 @@ def actualizar_cita(
 	cita_id: UUID,
 	payload: CitaUpdate,
 	db: Session = Depends(get_db),
-) -> CitaResponse:
+) -> dict:
 	"""Actualiza parcialmente una cita."""
 	try:
-		return update_cita(db, cita_id, payload)
+		cita = update_cita(db, cita_id, payload)
 	except ValueError as exc:
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST
 		raise HTTPException(status_code=status_code, detail=mensaje) from exc
+	return enriquecer_cita(cita)
 
 
 @app.post("/citas/{cita_id}/cancelar", response_model=CitaResponse, tags=["citas"])
@@ -234,15 +238,16 @@ def cancelar_cita_endpoint(
 	payload: CancelarCitaRequest,
 	x_user_id: str | None = Header(default=None, alias="X-User-ID"),
 	db: Session = Depends(get_db),
-) -> CitaResponse:
+) -> dict:
 	"""Cancela una cita si cumple reglas de negocio."""
 	realizado_por = _parse_user_id_header(x_user_id)
 	try:
-		return cancelar_cita(db, cita_id, payload.motivo, realizado_por)
+		cita = cancelar_cita(db, cita_id, payload.motivo, realizado_por)
 	except ValueError as exc:
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST
 		raise HTTPException(status_code=status_code, detail=mensaje) from exc
+	return enriquecer_cita(cita)
 
 
 @app.patch("/citas/{cita_id}/estado", response_model=CitaResponse, tags=["medico"])
@@ -251,11 +256,11 @@ def cambiar_estado_cita_endpoint(
 	payload: CambioEstadoRequest,
 	x_user_id: str | None = Header(default=None, alias="X-User-ID"),
 	db: Session = Depends(get_db),
-) -> CitaResponse:
+) -> dict:
 	"""Cambia el estado de una cita programada (atendida, no_asistio, cancelada)."""
 	realizado_por = _parse_user_id_header(x_user_id)
 	try:
-		return cambiar_estado_cita(
+		cita = cambiar_estado_cita(
 			db,
 			cita_id,
 			nuevo_estado=payload.estado,
@@ -266,6 +271,7 @@ def cambiar_estado_cita_endpoint(
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST
 		raise HTTPException(status_code=status_code, detail=mensaje) from exc
+	return enriquecer_cita(cita)
 
 
 @app.post("/citas/{cita_id}/reprogramar", response_model=CitaResponse, tags=["citas"])
@@ -274,11 +280,11 @@ def reprogramar_cita_endpoint(
 	payload: ReprogramarCitaRequest,
 	x_user_id: str | None = Header(default=None, alias="X-User-ID"),
 	db: Session = Depends(get_db),
-) -> CitaResponse:
+) -> dict:
 	"""Reprograma una cita validando disponibilidad."""
 	realizado_por = _parse_user_id_header(x_user_id)
 	try:
-		return reprogramar_cita(
+		cita = reprogramar_cita(
 			db,
 			cita_id,
 			payload.nueva_fecha,
@@ -287,6 +293,7 @@ def reprogramar_cita_endpoint(
 			realizado_por,
 			motivo=payload.motivo,
 		)
+		return enriquecer_cita(cita)
 	except ValueError as exc:
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST

@@ -12,10 +12,21 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
 
 from . import fsm
-from .groq_client import chat_completion, clasificar_evento_fsm, clasificar_sintomas, configurar_groq, ejecutar_funcion
+from .groq_client import (
+	chat_completion,
+	clasificar_evento_fsm,
+	clasificar_sintomas,
+	configurar_groq,
+	consultar_citas_del_usuario,
+	ejecutar_funcion,
+)
 from .prompts import SYSTEM_PROMPT as _mensaje_sistema_base
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+# UUID centinela para conversaciones sin usuario autenticado (ver post_chat).
+ANONIMO_UUID = UUID("00000000-0000-0000-0000-000000000000")
 from app.crud import (
 	actualizar_borrador,
 	cerrar_conversacion,
@@ -179,7 +190,7 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 
 	try:
 		if payload.conversacion_id is None:
-			usuario_id = payload.usuario_id or UUID("00000000-0000-0000-0000-000000000000")
+			usuario_id = payload.usuario_id or ANONIMO_UUID
 			conversacion = crear_conversacion(db, usuario_id=usuario_id)
 		else:
 			conversacion = get_conversacion(db, payload.conversacion_id)
@@ -198,6 +209,18 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 
 		# --- FSM de agendado: decide el estado ANTES de pedirle texto al LLM ---
 		borrador = get_or_create_borrador(db, conversacion.conversacion_id)
+		# Preferimos el usuario_id de la conversacion persistida (estable durante
+		# todo el flujo) sobre el del request puntual: asi un cliente que por
+		# error omita usuario_id en un mensaje a mitad de flujo (bug de frontend,
+		# reintento manual, etc.) no tumba un agendado que ya iba autenticado
+		# desde el inicio. Si la conversacion arranco anonima, se acepta el
+		# usuario_id del request como "login tardio" dentro de la misma charla.
+		if conversacion.usuario_id != ANONIMO_UUID:
+			usuario_id_autenticado = str(conversacion.usuario_id)
+		elif payload.usuario_id:
+			usuario_id_autenticado = str(payload.usuario_id)
+		else:
+			usuario_id_autenticado = None
 
 		evento_json = clasificar_evento_fsm(
 			estado_actual=borrador.estado,
@@ -206,11 +229,32 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 		)
 		logger.info(f"Evento FSM clasificado: {evento_json} (estado actual: {borrador.estado})")
 
+		# Agendar o consultar citas requiere una sesion autenticada real: una
+		# sesion anonima (sin usuario_id) no debe poder crear ni leer citas de
+		# nadie. Se degrada el evento y se le pide al usuario iniciar sesion.
+		requiere_login = False
+		if evento_json["evento"] in fsm.EVENTOS_QUE_REQUIEREN_USUARIO and not usuario_id_autenticado:
+			requiere_login = True
+			evento_json["evento"] = "no_aplica"
+
+		# "Consultar mis citas" no es un paso de la FSM de agendado: es una
+		# consulta de solo lectura que se responde con datos reales y no mueve
+		# el estado del borrador (se trata como no_aplica para la FSM).
+		resultado_consulta_citas: dict[str, Any] | None = None
+		if evento_json["evento"] == "consultar_citas":
+			resultado_consulta_citas = consultar_citas_del_usuario(usuario_id_autenticado)
+			evento_json["evento"] = "no_aplica"
+
 		seleccion_resuelta: dict[str, Any] | None = None
+		mensaje_validacion_fecha: str | None = None
 		if evento_json["evento"] == "avanzar":
 			if borrador.estado == fsm.ESPERANDO_FECHA_HORA:
 				if evento_json.get("fecha") and evento_json.get("hora"):
-					seleccion_resuelta = {"fecha": evento_json["fecha"], "hora": evento_json["hora"]}
+					mensaje_validacion_fecha = fsm.validar_fecha_hora(evento_json["fecha"], evento_json["hora"])
+					if mensaje_validacion_fecha is None:
+						seleccion_resuelta = {"fecha": evento_json["fecha"], "hora": evento_json["hora"]}
+					else:
+						evento_json["evento"] = "respuesta_invalida"
 				else:
 					evento_json["evento"] = "respuesta_invalida"
 			else:
@@ -240,34 +284,45 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 				"hora": borrador.hora,
 				"opciones_mostradas": None,
 			}
-			tipo_servicio = (
-				"medicina_general"
-				if (borrador.especialidad_nombre or "").strip().lower() == "medicina general"
-				else "especialista"
-			)
-			usuario_id_para_agendar = str(payload.usuario_id or conversacion.usuario_id)
-			resultado_agendado = ejecutar_funcion("agendar_cita", {
-				"usuario_id": usuario_id_para_agendar,
-				"medico_id": borrador.medico_id,
-				"especialidad_id": borrador.especialidad_id,
-				"tipo_servicio": tipo_servicio,
-				"fecha": borrador.fecha,
-				"hora": borrador.hora,
-				"sede_id": borrador.sede_id,
-				"confirmado": True,
-			})
-			logger.info(f"Resultado de agendar_cita: {resultado_agendado}")
 
-			if resultado_agendado.get("ok"):
-				borrador = actualizar_borrador(
-					db, borrador, estado=fsm.SIN_INTENCION,
-					campos_a_limpiar=list(fsm.TODOS_LOS_CAMPOS_DEL_BORRADOR),
-				)
-			else:
-				# El agendado fallo: se revierte a pedir confirmacion de nuevo.
+			if not usuario_id_autenticado:
+				# Defensa extra: nunca agendar sin una sesion autenticada real,
+				# incluso si por alguna razon se llego a este punto sin ella
+				# (ej. un borrador antiguo de antes de este cambio).
+				resultado_agendado = {
+					"ok": False,
+					"error": "Necesitas iniciar sesión para poder agendar tu cita.",
+				}
 				borrador = actualizar_borrador(db, borrador, estado=fsm.ESPERANDO_CONFIRMACION)
+			else:
+				tipo_servicio = (
+					"medicina_general"
+					if (borrador.especialidad_nombre or "").strip().lower() == "medicina general"
+					else "especialista"
+				)
+				resultado_agendado = ejecutar_funcion("agendar_cita", {
+					"usuario_id": usuario_id_autenticado,
+					"medico_id": borrador.medico_id,
+					"especialidad_id": borrador.especialidad_id,
+					"tipo_servicio": tipo_servicio,
+					"fecha": borrador.fecha,
+					"hora": borrador.hora,
+					"sede_id": borrador.sede_id,
+					"confirmado": True,
+				})
+				logger.info(f"Resultado de agendar_cita: {resultado_agendado}")
+
+				if resultado_agendado.get("ok"):
+					borrador = actualizar_borrador(
+						db, borrador, estado=fsm.SIN_INTENCION,
+						campos_a_limpiar=list(fsm.TODOS_LOS_CAMPOS_DEL_BORRADOR),
+					)
+				else:
+					# El agendado fallo: se revierte a pedir confirmacion de nuevo.
+					borrador = actualizar_borrador(db, borrador, estado=fsm.ESPERANDO_CONFIRMACION)
 
 		# Si entramos a un estado que requiere catalogo y aun no lo tenemos, consultarlo ahora.
+		error_catalogo: str | None = None
 		tool_de_entrada = fsm.TOOL_DE_ENTRADA.get(borrador.estado)
 		if tool_de_entrada and not borrador.opciones_mostradas:
 			args_tool: dict[str, Any] = {}
@@ -280,6 +335,19 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 				borrador = actualizar_borrador(
 					db, borrador, estado=borrador.estado,
 					campos_a_setear={"opciones_mostradas": opciones},
+				)
+			elif not resultado_tool.get("ok"):
+				# El catalogo no respondio: no dejar que el LLM improvise una
+				# lista inexistente. Se le avisa explicitamente del error.
+				error_catalogo = resultado_tool.get(
+					"error", "Hubo un problema consultando la información. ¿Querés intentar de nuevo?"
+				)
+			else:
+				# Respondio bien pero no hay opciones (ej. especialidad sin
+				# medicos asignados todavia).
+				error_catalogo = (
+					"No encontré opciones disponibles para este paso en este momento. "
+					"¿Querés intentar con otra opción o usar el formulario directo?"
 				)
 
 		# --- El LLM ya no decide el flujo: solo redacta la respuesta en lenguaje natural ---
@@ -320,6 +388,47 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 				"content": (
 					"Resultado del intento de agendar la cita (usalo para redactar la "
 					f"respuesta, nunca muestres IDs tecnicos): {json.dumps(resultado_agendado, ensure_ascii=False)}"
+				),
+			})
+
+		if resultado_consulta_citas is not None:
+			messages.append({
+				"role": "system",
+				"content": (
+					"El usuario pregunto por sus citas. Este es el resultado real de la "
+					"consulta (usalo para responder, nunca muestres IDs tecnicos; si ok=false "
+					"informa el error en lenguaje simple; si la lista de citas esta vacia dile "
+					"que no tiene citas programadas): "
+					f"{json.dumps(resultado_consulta_citas, ensure_ascii=False)}"
+				),
+			})
+
+		if requiere_login:
+			messages.append({
+				"role": "system",
+				"content": (
+					"El usuario no tiene una sesion iniciada. Dile amablemente que necesita "
+					"iniciar sesión para agendar o consultar sus citas."
+				),
+			})
+
+		if mensaje_validacion_fecha:
+			messages.append({
+				"role": "system",
+				"content": (
+					f"La fecha/hora que dio el usuario no es valida. Motivo: "
+					f"{mensaje_validacion_fecha} Explicaselo tal cual y pidele que intente de nuevo."
+				),
+			})
+
+		if error_catalogo:
+			messages.append({
+				"role": "system",
+				"content": (
+					f"No se pudo obtener la información necesaria para este paso: {error_catalogo} "
+					"NO inventes especialidades, medicos ni sedes que no te hayan sido confirmados "
+					"por una funcion. Informa el problema tal cual y ofrece reintentar o usar el "
+					"formulario directo."
 				),
 			})
 
