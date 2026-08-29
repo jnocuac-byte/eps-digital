@@ -285,10 +285,12 @@ def get_medico_especialidades(db: Session, medico_id: UUID) -> list[MedicoEspeci
 
 def get_especialidad_medicos(
 	db: Session, especialidad_id: UUID
-) -> list[MedicoEspecialidad]:
-	"""Lista medicos asignados a una especialidad."""
-	stmt = select(MedicoEspecialidad).where(
-		MedicoEspecialidad.especialidad_id == especialidad_id
+) -> list[Medico]:
+	"""Lista los medicos (con sus datos) asignados a una especialidad."""
+	stmt = (
+		select(Medico)
+		.join(MedicoEspecialidad, MedicoEspecialidad.medico_id == Medico.medico_id)
+		.where(MedicoEspecialidad.especialidad_id == especialidad_id)
 	)
 	return list(db.scalars(stmt).all())
 

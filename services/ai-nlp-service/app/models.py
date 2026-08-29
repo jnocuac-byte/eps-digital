@@ -7,7 +7,7 @@ from uuid import UUID as PyUUID
 from uuid import uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -40,6 +40,13 @@ class Conversacion(Base):
 	# Relacion 1:1 con el resultado de clasificacion de sintomas.
 	clasificacion_sintomas: Mapped[Optional[ClasificacionSintomas]] = relationship(
 		"ClasificacionSintomas",
+		back_populates="conversacion",
+		uselist=False,
+		cascade="all, delete-orphan",
+	)
+	# Relacion 1:1 con el borrador de la maquina de estados de agendado.
+	borrador_cita: Mapped[Optional[BorradorCita]] = relationship(
+		"BorradorCita",
 		back_populates="conversacion",
 		uselist=False,
 		cascade="all, delete-orphan",
@@ -96,4 +103,42 @@ class ClasificacionSintomas(Base):
 	# Relacion inversa 1:1 hacia la conversacion.
 	conversacion: Mapped[Conversacion] = relationship(
 		"Conversacion", back_populates="clasificacion_sintomas"
+	)
+
+
+class BorradorCita(Base):
+	"""Estado de la maquina de estados de agendado conversacional (FSM)."""
+
+	__tablename__ = "borrador_cita"
+
+	borrador_id: Mapped[PyUUID] = mapped_column(
+		UUID(as_uuid=True), primary_key=True, default=uuid4
+	)
+	conversacion_id: Mapped[PyUUID] = mapped_column(
+		UUID(as_uuid=True),
+		ForeignKey("conversacion.conversacion_id", ondelete="CASCADE"),
+		nullable=False,
+		unique=True,
+	)
+	estado: Mapped[str] = mapped_column(String(30), nullable=False, default="sin_intencion")
+
+	especialidad_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+	especialidad_nombre: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+	medico_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+	medico_nombre: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+	sede_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+	sede_nombre: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+	fecha: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+	hora: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
+
+	# Ultima lista de opciones mostrada al usuario (para resolver "el 2" o el nombre).
+	opciones_mostradas: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+
+	actualizado_en: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+	)
+
+	# Relacion inversa 1:1 hacia la conversacion.
+	conversacion: Mapped[Conversacion] = relationship(
+		"Conversacion", back_populates="borrador_cita"
 	)

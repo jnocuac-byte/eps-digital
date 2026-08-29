@@ -10,9 +10,9 @@ import httpx
 from dotenv import load_dotenv
 from groq import Groq
 
-from .prompts import CLASIFICACION_PROMPT, SYSTEM_PROMPT
+from .prompts import CLASIFICACION_PROMPT, EVENTO_FSM_PROMPT, SYSTEM_PROMPT
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"
 REQUEST_TIMEOUT_SECONDS = 30.0
 CITAS_TIMEOUT_SECONDS = 10.0
 logger = logging.getLogger(__name__)
@@ -302,7 +302,8 @@ def chat_completion(messages: list[dict], tools: list | None = None) -> tuple[st
 	kwargs = {
 		"model": GROQ_MODEL,
 		"messages": messages,
-		"max_tokens": 400,
+		"max_tokens": 2000,
+		"reasoning_effort": "low",
 	}
 
 	if tools:
@@ -351,6 +352,8 @@ def clasificar_sintomas(sintomas_texto: str) -> dict[str, Any]:
 			model=GROQ_MODEL,
 			messages=messages,
 			temperature=0,
+			max_tokens=2000,
+			reasoning_effort="low",
 			response_format={"type": "json_object"},
 		)
 		if not response.choices:
@@ -364,6 +367,69 @@ def clasificar_sintomas(sintomas_texto: str) -> dict[str, Any]:
 		return _normalizar_clasificacion(parsed)
 	except Exception:
 		return _clasificacion_por_defecto()
+
+
+def _evento_por_defecto(estado_actual: str) -> dict[str, Any]:
+	"""Evento seguro cuando falla la clasificacion: no cambia nada."""
+	return {
+		"evento": "no_aplica" if estado_actual == "sin_intencion" else "respuesta_invalida",
+		"seleccion_texto": None,
+		"fecha": None,
+		"hora": None,
+	}
+
+
+def clasificar_evento_fsm(estado_actual: str, mensaje: str, opciones_mostradas: list | None = None) -> dict[str, Any]:
+	"""Clasifica el mensaje del usuario en un evento de la FSM de agendado (JSON estructurado)."""
+	client = _asegurar_cliente()
+
+	contexto = f"Estado actual: {estado_actual}\n"
+	if opciones_mostradas:
+		contexto += f"Opciones mostradas al usuario en este paso: {json.dumps(opciones_mostradas, ensure_ascii=False)}\n"
+	contexto += f"Mensaje del usuario: {mensaje}"
+
+	messages = [
+		{"role": "system", "content": EVENTO_FSM_PROMPT},
+		{"role": "user", "content": contexto},
+	]
+
+	try:
+		response = client.chat.completions.create(
+			model=GROQ_MODEL,
+			messages=messages,
+			temperature=0,
+			max_tokens=2000,
+			reasoning_effort="low",
+			response_format={"type": "json_object"},
+		)
+		if not response.choices:
+			return _evento_por_defecto(estado_actual)
+
+		content = response.choices[0].message.content or ""
+		parsed = _parsear_json_con_rescate(content)
+		if parsed is None:
+			return _evento_por_defecto(estado_actual)
+
+		evento = str(parsed.get("evento") or "").strip().lower()
+		if evento not in {
+			"iniciar_agendamiento", "avanzar", "retroceder_un_paso",
+			"cancelar_todo", "respuesta_invalida", "no_aplica",
+		}:
+			evento = _evento_por_defecto(estado_actual)["evento"]
+
+		seleccion_texto = parsed.get("seleccion_texto")
+		fecha = parsed.get("fecha")
+		hora = parsed.get("hora")
+
+		return {
+			"evento": evento,
+			"seleccion_texto": str(seleccion_texto) if seleccion_texto else None,
+			"fecha": str(fecha) if fecha else None,
+			"hora": str(hora) if hora else None,
+		}
+	except Exception as exc:
+		logger.error(f"Error al clasificar evento FSM: {exc}")
+		return _evento_por_defecto(estado_actual)
 
 
 def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:

@@ -91,3 +91,4 @@ class ChatResponse(BaseModel):
 	respuesta: str
 	conversacion_id: UUID
 	clasificacion: ClasificacionSintomasResponse | None = None
+	estado_fsm: str | None = None

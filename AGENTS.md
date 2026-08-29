@@ -67,6 +67,57 @@ queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `med
 
 ---
 
+## Levantar el proyecto completo en un equipo nuevo
+
+### Opcion A — Docker Compose (recomendada, un solo comando)
+
+Requiere Docker Desktop instalado y corriendo.
+
+```bash
+git clone --branch pardoski https://github.com/jnocuac-byte/eps-digital.git
+cd eps-digital
+cp .env.example .env        # completar GROQ_API_KEY y JWT_SECRET_KEY
+docker compose up --build   # levanta 5 Postgres + RabbitMQ + 6 servicios + frontend
+```
+
+Frontend en `http://localhost:5173`. Cada backend corre `alembic upgrade head` como
+parte de su `command` en `docker-compose.yml`, asi que las migraciones se aplican solas.
+
+### Opcion B — Manual, sin Docker (Windows)
+
+Solo necesario si Docker no esta disponible en el equipo. Requiere PostgreSQL 15+,
+Python 3.12+ y Node 18+ instalados.
+
+```powershell
+# 1) Crear rol y bases de datos (una vez)
+psql -U postgres -c "CREATE ROLE eps_user LOGIN PASSWORD 'eps_password' CREATEDB;"
+foreach ($db in "eps_auth","eps_user","eps_citas","eps_catalogo","eps_ainlp") {
+  createdb -U postgres -O eps_user $db
+}
+
+# 2) Por cada servicio en services/<svc>/: crear .env, venv, migrar, levantar
+cd services/<svc>
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+# crear .env con DATABASE_URL=postgresql://eps_user:eps_password@localhost:5432/eps_<db>
+# (ver tabla de puertos/BD mas abajo; ai-nlp-service ademas necesita GROQ_API_KEY)
+./.venv/Scripts/python.exe -m alembic upgrade head
+./.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 800X
+
+# 3) Frontend
+cd frontend
+npm install
+npm run dev   # http://localhost:5173, ya apunta a localhost:800X automaticamente
+```
+
+Sin datos en `catalog-service` el chatbot no tiene especialidades/medicos/sedes que
+ofrecer — hay que crear al menos una especialidad, un medico (con su
+`medico_especialidades`) y una sede via los endpoints POST de `catalog-service`
+(`/servicios`, `/especialidades`, `/medicos`, `/medicos/{id}/especialidades/{id}`,
+`/sedes`) antes de probar el flujo de agendado.
+
+---
+
 ## Arquitectura de servicios
 
 | Servicio | Puerto | BD PostgreSQL | Responsabilidad |
@@ -75,7 +126,7 @@ queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `med
 | user-service | 8002 | `eps_user` (host 5433) | Perfiles `usuarios`, `informacion_medica`, `afiliaciones`. Fuente de búsqueda por documento |
 | appointments-service | 8003 | `eps_citas` (host 5434) | Citas, historial de estados, recordatorios, métricas y slots disponibles (zona `America/Bogota`) |
 | catalog-service | 8004 | `eps_catalogo` (host 5435) | Servicios, especialidades, médicos, sedes, disponibilidad semanal. Borrado lógico (`activo=false`) |
-| ai-nlp-service | 8005 | `eps_ainlp` (host 5436) | Chatbot Groq, clasificación de síntomas, agendado por function calling |
+| ai-nlp-service | 8005 | `eps_ainlp` (host 5436) | Chatbot Groq, clasificación de síntomas, agendado guiado por maquina de estados (FSM) |
 | notifications-service | 8006 | externa vía `DATABASE_URL` | Consumer RabbitMQ → emails SendGrid; notificaciones in-app para médicos |
 
 - Cada servicio = su propia BD. **Sin Foreign Keys entre bases**: las referencias cruzadas son
@@ -203,24 +254,62 @@ de rutas al añadir endpoints bajo `/citas/`.
 
 ---
 
-## Chatbot AI-NLP: contrato de tools
+## Chatbot AI-NLP: maquina de estados (FSM) de agendado
 
-Flujo de agendado conversacional (function calling contra servicios reales):
-`obtener_especialidades()` → usuario elige → `obtener_medicos(especialidad_id)` →
-`obtener_sedes()` → fecha/hora → confirmar → `agendar_cita(...)`.
+El agendado conversacional YA NO lo decide el LLM libremente. Hay una FSM determinista
+en `app/fsm.py` que controla el flujo; el LLM solo redacta texto y (en los pasos que
+corresponde) hace la llamada de catalogo. Esto se hizo para poder manejar de forma
+confiable que el usuario se retracte de una decision a mitad del flujo.
+
+**Estados** (`fsm.ORDEN_ESTADOS`): `sin_intencion` → `esperando_especialidad` →
+`esperando_medico` → `esperando_sede` → `esperando_fecha_hora` →
+`esperando_confirmacion` → `agendada`.
+
+**Persistencia**: tabla `borrador_cita` (1:1 con `conversacion`, ver `app/models.py`)
+guarda `estado` + los campos ya elegidos (`especialidad_id/nombre`, `medico_id/nombre`,
+`sede_id/nombre`, `fecha`, `hora`) + `opciones_mostradas` (JSONB con la ultima lista
+ofrecida, para poder resolver "el 2" o el nombre contra IDs reales).
+
+**Por turno, en `main.py::post_chat`**:
+1. `clasificar_evento_fsm()` (Groq, JSON estructurado, prompt `EVENTO_FSM_PROMPT`)
+   traduce el mensaje del usuario a un evento: `iniciar_agendamiento`, `avanzar`,
+   `retroceder_un_paso`, `cancelar_todo`, `respuesta_invalida` o `no_aplica`.
+2. `fsm.aplicar_evento(estado_actual, evento, seleccion)` es una funcion PURA (sin BD
+   ni LLM) que calcula el `estado_nuevo` y que campos limpiar/setear. Al retroceder,
+   limpia el campo del paso que se esta deshaciendo — invalidando en cascada lo que
+   dependia de esa eleccion (ej. cambiar especialidad invalida el medico ya elegido).
+3. Si el estado nuevo requiere catalogo (`fsm.TOOL_DE_ENTRADA`) y no hay
+   `opciones_mostradas` frescas, se llama la tool DETERMINISTICAMENTE (no vía
+   function-calling del LLM) y se normaliza a `[{id, nombre}]`.
+4. Si `debe_agendar` (el usuario confirmo en `esperando_confirmacion`), se llama
+   `ejecutar_funcion("agendar_cita", ...)` directo con los datos del borrador — el LLM
+   nunca decide cuando agendar, solo redacta el resultado despues.
+5. El LLM (`chat_completion`, sin `tools`) solo redacta la respuesta. Dentro del flujo
+   de agendado (estado != `sin_intencion`) NO se le manda el historial de la
+   conversacion, solo el ultimo mensaje + `fsm.describir_estado(...)` como system
+   message: mandar historial hace que el modelo "repita" su respuesta anterior en vez
+   de reaccionar al nuevo estado tras una retractacion.
 
 Endpoints correctos del Catalog Service para las tools:
 - `/especialidades`
-- `/especialidades/{especialidad_id}/medicos` (NO `/medicos?especialidad_id=`)
+- `/especialidades/{especialidad_id}/medicos` (devuelve `MedicoResponse[]` con datos
+  reales del medico — antes devolvia solo las filas crudas de `medico_especialidades`,
+  se corrigio el join en `catalog-service/app/crud.py::get_especialidad_medicos`)
 - `/sedes`
 
 Y para agendar: `POST {CITAS_SERVICE_URL}/citas` con header `X-User-ID`.
 
 Notas:
-- Modelo Groq `llama-3.3-70b-versatile`; `chat_completion` usa `max_tokens=400`.
-- Errores y confirmaciones SIEMPRE en lenguaje natural, sin UUIDs ni tecnicismos
-  (`groq_client.py` ya formatea; `prompts.py` controla estilo y longitud).
-- `obtener_disponibilidad_citas` es simulada (cupos fijos); el resto consulta servicios reales.
+- Modelo Groq `openai/gpt-oss-120b` (constante `GROQ_MODEL` en `groq_client.py`).
+  `llama-3.3-70b-versatile` fue retirado del catalogo de Groq; si vuelve a pasar,
+  revisar modelos vigentes con `GET https://api.groq.com/openai/v1/models`.
+- Es un modelo "razonador": consume tokens de `reasoning` antes del contenido visible.
+  Todas las llamadas usan `reasoning_effort="low"` y `max_tokens=2000` — si las
+  respuestas empiezan a llegar vacias (`content=""`), es sintoma de que el razonamiento
+  esta agotando el presupuesto de tokens; subir `max_tokens` o revisar el prompt.
+- Errores y confirmaciones SIEMPRE en lenguaje natural, sin UUIDs ni tecnicismos.
+- `obtener_disponibilidad_citas` es simulada (cupos fijos) y quedo fuera de la FSM
+  (no se expone en el flujo de agendado); el resto consulta servicios reales.
 
 ---
 
@@ -281,6 +370,7 @@ Notas:
 | `services/auth-service/app/auth.py` | JWT, bcrypt, bloqueos, 2FA, recuperación |
 | `services/appointments-service/app/crud.py` | Citas, slots, zona horaria Bogotá, métricas |
 | `services/catalog-service/app/crud.py` | Disponibilidad de médicos y borrado lógico |
-| `services/ai-nlp-service/app/groq_client.py` | Tools del asistente y llamadas inter-servicio |
-| `services/ai-nlp-service/app/prompts.py` | SYSTEM_PROMPT: tono, formato Markdown, límites |
+| `services/ai-nlp-service/app/groq_client.py` | Cliente Groq, tools del asistente, `clasificar_evento_fsm` |
+| `services/ai-nlp-service/app/fsm.py` | Maquina de estados de agendado: estados, transiciones, invalidacion en retroceso |
+| `services/ai-nlp-service/app/prompts.py` | SYSTEM_PROMPT: tono, formato Markdown, límites; EVENTO_FSM_PROMPT: clasificador de eventos |
 | `services/notifications-service/app/consumer.py` | Colas RabbitMQ y despacho de plantillas |

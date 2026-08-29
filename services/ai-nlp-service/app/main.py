@@ -11,10 +11,13 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
 
-from .groq_client import chat_completion, clasificar_sintomas, configurar_groq, ejecutar_funcion
+from . import fsm
+from .groq_client import chat_completion, clasificar_evento_fsm, clasificar_sintomas, configurar_groq, ejecutar_funcion
+from .prompts import SYSTEM_PROMPT as _mensaje_sistema_base
 
 logger = logging.getLogger(__name__)
 from app.crud import (
+	actualizar_borrador,
 	cerrar_conversacion,
 	crear_clasificacion,
 	crear_conversacion,
@@ -23,9 +26,9 @@ from app.crud import (
 	get_conversacion,
 	get_conversaciones_by_usuario,
 	get_mensajes_by_conversacion,
+	get_or_create_borrador,
 )
 from .database import get_db, Base, engine
-from .prompts import get_assistant_tools
 from .schemas import (
 	ChatRequest,
 	ChatResponse,
@@ -118,6 +121,38 @@ def _es_mensaje_relevante_para_clasificacion(mensaje: str) -> bool:
 	return any(palabra in texto for palabra in palabras_clave)
 
 
+def _normalizar_opciones(tool_name: str, resultado: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convierte el resultado crudo de una tool de catalogo en opciones id+nombre."""
+    if not resultado.get("ok"):
+        return []
+
+    if tool_name == "obtener_especialidades":
+        items = resultado.get("especialidades") or []
+        return [
+            {"id": str(i.get("especialidad_id")), "nombre": i.get("nombre")}
+            for i in items
+        ]
+
+    if tool_name == "obtener_medicos":
+        items = resultado.get("medicos") or []
+        return [
+            {
+                "id": str(i.get("medico_id")),
+                "nombre": f"{i.get('nombres', '')} {i.get('apellidos', '')}".strip(),
+            }
+            for i in items
+        ]
+
+    if tool_name == "obtener_sedes":
+        items = resultado.get("sedes") or []
+        return [
+            {"id": str(i.get("sede_id")), "nombre": i.get("nombre")}
+            for i in items
+        ]
+
+    return []
+
+
 def _mapear_historial_a_mensajes_llm(mensajes_db: list[Any]) -> list[dict[str, str]]:
     """Convierte mensajes persistidos al formato role/content del modelo."""
     history: list[dict[str, str]] = []
@@ -161,55 +196,141 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 			contenido=payload.mensaje,
 		)
 
-		historial = get_mensajes_by_conversacion(db, conversacion.conversacion_id, limit=6)
-		messages = _mapear_historial_a_mensajes_llm(historial)
+		# --- FSM de agendado: decide el estado ANTES de pedirle texto al LLM ---
+		borrador = get_or_create_borrador(db, conversacion.conversacion_id)
 
-		if payload.usuario_id:
-			messages.insert(0, {
+		evento_json = clasificar_evento_fsm(
+			estado_actual=borrador.estado,
+			mensaje=payload.mensaje,
+			opciones_mostradas=borrador.opciones_mostradas,
+		)
+		logger.info(f"Evento FSM clasificado: {evento_json} (estado actual: {borrador.estado})")
+
+		seleccion_resuelta: dict[str, Any] | None = None
+		if evento_json["evento"] == "avanzar":
+			if borrador.estado == fsm.ESPERANDO_FECHA_HORA:
+				if evento_json.get("fecha") and evento_json.get("hora"):
+					seleccion_resuelta = {"fecha": evento_json["fecha"], "hora": evento_json["hora"]}
+				else:
+					evento_json["evento"] = "respuesta_invalida"
+			else:
+				seleccion_resuelta = fsm.resolver_seleccion(
+					borrador.estado, evento_json.get("seleccion_texto"), borrador.opciones_mostradas,
+				)
+				if seleccion_resuelta is None and borrador.estado in fsm.CAMPOS_DEL_PASO:
+					evento_json["evento"] = "respuesta_invalida"
+
+		transicion = fsm.aplicar_evento(borrador.estado, evento_json["evento"], seleccion_resuelta)
+		borrador = actualizar_borrador(
+			db, borrador,
+			estado=transicion.estado_nuevo,
+			campos_a_limpiar=transicion.campos_a_limpiar,
+			campos_a_setear=transicion.campos_a_setear,
+		)
+
+		resultado_agendado: dict[str, Any] | None = None
+		snapshot_pre_agendado: dict[str, Any] | None = None
+
+		if transicion.debe_agendar:
+			snapshot_pre_agendado = {
+				"especialidad_nombre": borrador.especialidad_nombre,
+				"medico_nombre": borrador.medico_nombre,
+				"sede_nombre": borrador.sede_nombre,
+				"fecha": borrador.fecha,
+				"hora": borrador.hora,
+				"opciones_mostradas": None,
+			}
+			tipo_servicio = (
+				"medicina_general"
+				if (borrador.especialidad_nombre or "").strip().lower() == "medicina general"
+				else "especialista"
+			)
+			usuario_id_para_agendar = str(payload.usuario_id or conversacion.usuario_id)
+			resultado_agendado = ejecutar_funcion("agendar_cita", {
+				"usuario_id": usuario_id_para_agendar,
+				"medico_id": borrador.medico_id,
+				"especialidad_id": borrador.especialidad_id,
+				"tipo_servicio": tipo_servicio,
+				"fecha": borrador.fecha,
+				"hora": borrador.hora,
+				"sede_id": borrador.sede_id,
+				"confirmado": True,
+			})
+			logger.info(f"Resultado de agendar_cita: {resultado_agendado}")
+
+			if resultado_agendado.get("ok"):
+				borrador = actualizar_borrador(
+					db, borrador, estado=fsm.SIN_INTENCION,
+					campos_a_limpiar=list(fsm.TODOS_LOS_CAMPOS_DEL_BORRADOR),
+				)
+			else:
+				# El agendado fallo: se revierte a pedir confirmacion de nuevo.
+				borrador = actualizar_borrador(db, borrador, estado=fsm.ESPERANDO_CONFIRMACION)
+
+		# Si entramos a un estado que requiere catalogo y aun no lo tenemos, consultarlo ahora.
+		tool_de_entrada = fsm.TOOL_DE_ENTRADA.get(borrador.estado)
+		if tool_de_entrada and not borrador.opciones_mostradas:
+			args_tool: dict[str, Any] = {}
+			if tool_de_entrada == "obtener_medicos":
+				args_tool = {"especialidad_id": borrador.especialidad_id}
+
+			resultado_tool = ejecutar_funcion(tool_de_entrada, args_tool)
+			opciones = _normalizar_opciones(tool_de_entrada, resultado_tool)
+			if opciones:
+				borrador = actualizar_borrador(
+					db, borrador, estado=borrador.estado,
+					campos_a_setear={"opciones_mostradas": opciones},
+				)
+
+		# --- El LLM ya no decide el flujo: solo redacta la respuesta en lenguaje natural ---
+		if resultado_agendado is not None and resultado_agendado.get("ok") and snapshot_pre_agendado is not None:
+			# El borrador ya se reseteo a sin_intencion; describir "agendada" con
+			# los datos que se acaban de usar, no con el borrador ya vacio.
+			estado_para_contexto = fsm.AGENDADA
+			datos_para_contexto = snapshot_pre_agendado
+		else:
+			estado_para_contexto = borrador.estado
+			datos_para_contexto = {
+				"especialidad_nombre": borrador.especialidad_nombre,
+				"medico_nombre": borrador.medico_nombre,
+				"sede_nombre": borrador.sede_nombre,
+				"fecha": borrador.fecha,
+				"hora": borrador.hora,
+				"opciones_mostradas": borrador.opciones_mostradas,
+			}
+
+		contexto_fsm = fsm.describir_estado(estado_para_contexto, datos_para_contexto)
+
+		messages: list[dict[str, str]] = [{"role": "system", "content": _mensaje_sistema_base}]
+
+		if estado_para_contexto == fsm.SIN_INTENCION:
+			# Charla libre: aqui si ayuda dar contexto de turnos previos.
+			historial = get_mensajes_by_conversacion(db, conversacion.conversacion_id, limit=6)
+			messages.extend(_mapear_historial_a_mensajes_llm(historial))
+		else:
+			# Dentro del flujo de agendado NO se manda el historial completo: el
+			# LLM tiende a repetir/continuar su propia respuesta anterior en vez
+			# de reaccionar al nuevo estado (p.ej. tras una retractacion). El
+			# borrador (servidor) ya es la unica fuente de verdad del progreso.
+			messages.append({"role": "user", "content": payload.mensaje})
+
+		if resultado_agendado is not None:
+			messages.append({
 				"role": "system",
-				"content": f"El usuario actual esta autenticado. Su ID es: {payload.usuario_id}. Usa este ID cuando llames a funciones que requieran usuario_id.",
+				"content": (
+					"Resultado del intento de agendar la cita (usalo para redactar la "
+					f"respuesta, nunca muestres IDs tecnicos): {json.dumps(resultado_agendado, ensure_ascii=False)}"
+				),
 			})
 
-		tools = get_assistant_tools()
-		logger.info(f"Enviando chat con {len(messages)} mensajes y {len(tools)} tools disponibles")
-		respuesta_texto, tool_calls = chat_completion(
-			messages=messages,
-			tools=tools,
-		)
-		logger.info(f"Respuesta inicial: {respuesta_texto[:200]}... | tool_calls: {tool_calls}")
+		messages.append({
+			"role": "system",
+			"content": f"INSTRUCCION ACTUAL:\n{contexto_fsm}",
+		})
 
-		if tool_calls:
-			logger.info(f"Se detectaron {len(tool_calls)} tool_calls, ejecutando...")
-			for tc in tool_calls:
-				try:
-					arguments = json.loads(tc["arguments"]) if isinstance(tc["arguments"], str) else tc["arguments"]
-				except json.JSONDecodeError:
-					arguments = {}
-
-				logger.info(f"Ejecutando tool: {tc['name']} con args: {arguments}")
-				resultado = ejecutar_funcion(tc["name"], arguments)
-				logger.info(f"Resultado tool: {resultado}")
-
-				messages.append({
-					"role": "assistant",
-					"tool_calls": [{
-						"id": tc["id"],
-						"type": "function",
-						"function": {
-							"name": tc["name"],
-							"arguments": tc["arguments"],
-						}
-					}]
-				})
-				messages.append({
-					"role": "tool",
-					"tool_call_id": tc["id"],
-					"content": json.dumps(resultado),
-				})
-
-			respuesta_final, _ = chat_completion(messages=messages, tools=None)
-			if respuesta_final:
-				respuesta_texto = respuesta_final
+		logger.info(f"Enviando chat con {len(messages)} mensajes (estado FSM: {borrador.estado}, sin tools)")
+		respuesta_texto, _ = chat_completion(messages=messages, tools=None)
+		logger.info(f"Respuesta generada: {respuesta_texto[:200]}...")
 
 		crear_mensaje(
 			db,
@@ -255,6 +376,7 @@ def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespon
 			respuesta=respuesta_texto,
 			conversacion_id=conversacion.conversacion_id,
 			clasificacion=clasificacion_response,
+			estado_fsm=borrador.estado,
 		)
 
 	except HTTPException:

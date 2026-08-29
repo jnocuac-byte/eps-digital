@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import ClasificacionSintomas, Conversacion, Mensaje, utc_now
+from .models import BorradorCita, ClasificacionSintomas, Conversacion, Mensaje, utc_now
 
 
 # CONVERSACION
@@ -118,3 +118,44 @@ def get_clasificacion_by_conversacion(
 		ClasificacionSintomas.conversacion_id == conversacion_id
 	)
 	return db.scalar(stmt)
+
+
+# BORRADOR_CITA (estado de la FSM de agendado)
+def get_borrador(db: Session, conversacion_id: UUID) -> BorradorCita | None:
+	"""Obtiene el borrador de agendado de una conversacion, si existe."""
+	stmt = select(BorradorCita).where(BorradorCita.conversacion_id == conversacion_id)
+	return db.scalar(stmt)
+
+
+def get_or_create_borrador(db: Session, conversacion_id: UUID) -> BorradorCita:
+	"""Obtiene el borrador existente o crea uno nuevo en estado inicial."""
+	borrador = get_borrador(db, conversacion_id)
+	if borrador is not None:
+		return borrador
+
+	borrador = BorradorCita(conversacion_id=conversacion_id, estado="sin_intencion")
+	db.add(borrador)
+	db.commit()
+	db.refresh(borrador)
+	return borrador
+
+
+def actualizar_borrador(
+	db: Session,
+	borrador: BorradorCita,
+	estado: str,
+	campos_a_limpiar: list[str] | None = None,
+	campos_a_setear: dict | None = None,
+) -> BorradorCita:
+	"""Aplica el resultado de una transicion de la FSM sobre el borrador persistido."""
+	for campo in campos_a_limpiar or []:
+		setattr(borrador, campo, None)
+
+	for campo, valor in (campos_a_setear or {}).items():
+		setattr(borrador, campo, valor)
+
+	borrador.estado = estado
+	borrador.actualizado_en = utc_now()
+	db.commit()
+	db.refresh(borrador)
+	return borrador

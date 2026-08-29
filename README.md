@@ -103,7 +103,7 @@ La plataforma sigue una **arquitectura de microservicios** con los siguientes co
 | **User Service** | 8002 | Gestión de perfiles, información médica, afiliación | FastAPI, SQLAlchemy |
 | **Citas Service** | 8003 | Agendar, cancelar, reprogramar, historial de citas | FastAPI, RabbitMQ |
 | **Catálogo Service** | 8004 | Servicios, especialidades, médicos, disponibilidad | FastAPI, PostgreSQL |
-| **IA/NLP Service** | 8005 | Chatbot, clasificación de síntomas, análisis de urgencia | FastAPI, Groq AI |
+| **IA/NLP Service** | 8005 | Chatbot con máquina de estados para agendado, clasificación de síntomas, análisis de urgencia | FastAPI, Groq AI |
 | **Notificaciones Service** | 8006 | Envío de correos (confirmaciones, recordatorios) | FastAPI, SendGrid, RabbitMQ |
 
 ---
@@ -174,6 +174,10 @@ La plataforma sigue una **arquitectura de microservicios** con los siguientes co
 - `conversacion`: sesiones de chat con el asistente
 - `mensaje`: mensajes individuales de la conversación
 - `clasificacion_sintomas`: resultados del análisis de síntomas
+- `borrador_cita`: estado de la máquina de estados (FSM) del flujo de agendado por
+  chat — paso actual, datos ya elegidos (especialidad, médico, sede, fecha, hora) y
+  últimas opciones mostradas al usuario. Permite manejar retractaciones del usuario
+  a mitad del flujo sin perder consistencia.
 
 ### Catálogo Service (Base de datos: `eps_catalogo`)
 - `servicios`: servicios médicos disponibles

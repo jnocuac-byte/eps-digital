@@ -342,12 +342,13 @@ def listar_especialidades_medico(
 
 @app.get(
 	"/especialidades/{especialidad_id}/medicos",
-	response_model=list[MedicoEspecialidadResponse],
+	response_model=list[MedicoResponse],
 	tags=["Medico-Especialidad"],
 )
 def listar_medicos_especialidad(
 	especialidad_id: UUID, db: Session = Depends(get_db)
-) -> list[MedicoEspecialidadResponse]:
+) -> list[MedicoResponse]:
+	"""Lista los medicos (con sus datos) asignados a una especialidad."""
 	return crud.get_especialidad_medicos(db, especialidad_id)
 
 
