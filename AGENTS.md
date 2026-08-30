@@ -76,7 +76,7 @@ queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `med
 | appointments-service | 8003 | `eps_citas` (host 5434) | Citas, historial de estados, recordatorios, métricas y slots disponibles (zona `America/Bogota`) |
 | catalog-service | 8004 | `eps_catalogo` (host 5435) | Servicios, especialidades, médicos, sedes, disponibilidad semanal. Borrado lógico (`activo=false`) |
 | ai-nlp-service | 8005 | `eps_ainlp` (host 5436) | Chatbot Groq, clasificación de síntomas, agendado por function calling |
-| notifications-service | 8006 | externa vía `DATABASE_URL` | Consumer RabbitMQ → emails SendGrid; notificaciones in-app para médicos |
+| notifications-service | 8006 | externa vía `DATABASE_URL` | Consumer RabbitMQ → emails SendGrid; notificaciones in-app para médicos (HTTP API) |
 
 - Cada servicio = su propia BD. **Sin Foreign Keys entre bases**: las referencias cruzadas son
   UUIDs lógicos (ej. `credenciales.usuario_id`, `citas.medico_id/sede_id/especialidad_id`,
@@ -162,6 +162,8 @@ de rutas al añadir endpoints bajo `/citas/`.
 
 - Ack manual siempre (`finally`); reconexión automática cada 5 s; consumer corre como thread
   daemon iniciado en el `lifespan`.
+- Notificaciones internas (campana web) van por HTTP: `POST {NOTIFICATIONS_SERVICE_URL}/notificaciones`
+  con `{ medico_id, tipo, titulo, descripcion }`. RabbitMQ/SendGrid son solo para emails externos.
 - Las colas `cita_*` están preparadas pero hoy NINGÚN servicio las publica (no hay emails de
   confirmación/cancelación de citas por esa vía).
 - ⚠ `RABBITMQ_DEFAULT_URL` tiene credenciales CloudAMQP hardcodeadas como fallback en
@@ -232,6 +234,7 @@ Notas:
 | `JWT_SECRET_KEY` | auth | firma HS256 (único punto de verdad) |
 | `USER_SERVICE_URL` | auth | login por documento (`/usuarios/buscar`) |
 | `CATALOG_SERVICE_URL` | citas, ai-nlp | médicos disponibles, especialidades, sedes |
+| `NOTIFICATIONS_SERVICE_URL` | citas | notificaciones internas al agendar (`POST /notificaciones`) |
 | `CITAS_SERVICE_URL` | ai-nlp | agendado real desde el chat |
 | `GROQ_API_KEY` | ai-nlp | cliente LLM |
 | `RABBITMQ_URL` | auth, notifications | broker AMQP (fallback hardcodeado: rotar credenciales) |
