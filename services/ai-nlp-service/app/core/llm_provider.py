@@ -80,7 +80,7 @@ class GroqProvider(LLMProvider):
         from groq import Groq
 
         self._client = Groq(api_key=api_key, timeout=30.0)
-        self._model = "llama-3.3-70b-versatile"
+        self._model = "llama-3.1-70b-versatile"
 
     @property
     def name(self) -> str:
@@ -124,7 +124,7 @@ class GeminiProvider(LLMProvider):
         from google import genai
 
         self._client = genai.Client(api_key=api_key)
-        self._model = "gemini-2.0-flash"
+        self._model = "gemini-1.5-flash"
 
     @property
     def name(self) -> str:
@@ -181,7 +181,7 @@ class CerebrasProvider(LLMProvider):
         from cerebras.cloud.sdk import Cerebras
 
         self._client = Cerebras(api_key=api_key)
-        self._model = "llama-3.1-8b"
+        self._model = "llama3.1-8b"
 
     @property
     def name(self) -> str:
