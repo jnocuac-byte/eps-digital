@@ -75,7 +75,7 @@ queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `med
 | user-service | 8002 | `eps_user` (host 5433) | Perfiles `usuarios`, `informacion_medica`, `afiliaciones`. Fuente de búsqueda por documento |
 | appointments-service | 8003 | `eps_citas` (host 5434) | Citas, historial de estados, recordatorios, métricas y slots disponibles (zona `America/Bogota`) |
 | catalog-service | 8004 | `eps_catalogo` (host 5435) | Servicios, especialidades, médicos, sedes, disponibilidad semanal. Borrado lógico (`activo=false`) |
-| ai-nlp-service | 8005 | `eps_ainlp` (host 5436) | Chatbot Groq, clasificación de síntomas, agendado por function calling |
+| ai-nlp-service | 8005 | `eps_ainlp` (host 5436) | Chatbot multi-agente: triaje + agendamiento. LLMProviderFactory con fallback (Gemini→Groq→Cerebras→Mistral). Knowledge base de triaje |
 | notifications-service | 8006 | externa vía `DATABASE_URL` | Consumer RabbitMQ → emails SendGrid; notificaciones in-app para médicos (HTTP API) |
 
 - Cada servicio = su propia BD. **Sin Foreign Keys entre bases**: las referencias cruzadas son
@@ -93,7 +93,7 @@ queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `med
 - Pydantic v2 (schemas con validadores `field_validator` / `model_validator`)
 - Alembic para migraciones; `psycopg2-binary`; `httpx` para llamadas inter-servicio
 - auth: `bcrypt` (12 rounds) + `python-jose` (JWT HS256); pika (RabbitMQ)
-- ai-nlp: SDK `groq` + `tzdata` (zonas horarias); notifications: `sendgrid` + `pika`
+- ai-nlp: SDK `groq` + `google-genai` + `cerebras-cloud-sdk` + `mistralai` (fallback multi-provider); knowledge base JSON; notifications: `sendgrid` + `pika`
 
 ### Frontend
 - React 18 + Vite 6 + TypeScript + Tailwind CSS 4 (`@tailwindcss/vite`)
@@ -173,45 +173,51 @@ de rutas al añadir endpoints bajo `/citas/`.
 
 ## Frontend: patrones y reglas
 
-- Estado de sesión: `app/stores/authStore.ts` (Zustand + persist) — guarda tokens JWT,
-  userId, user, rol y medicoId en `localStorage` bajo la clave `'eps-auth-storage'`.
-  `logout()` resetea todo.
-- Cliente API único: `app/lib/apiClient.ts`. Define 6 instancias Axios (auth/user/citas/
-  catálogo/ai/notificaciones), **todas con interceptor** que inyecta `Authorization: Bearer` +
-  header `X-User-ID`. Un 401 dispara `logout()` + redirect duro a `/login`.
-- ⚠ Las URLs base se eligen por hostname dentro de `apiClient.ts` (localhost vs `*.onrender.com`).
-  El archivo `frontend/.env` define `VITE_*_URL` pero **nadie las lee**: cambiar el .env no
-  tiene efecto.
-- Actualización de perfil de usuario usa **PUT**, no PATCH: `userClient.put('/usuarios/${id}', data)`.
-- Disponibilidad de servicios del catálogo usa campo **`activo`** (backend); el tipo TS
-  `Servicio.disponible` existe pero el backend nunca lo envía.
-- TanStack Query: invalidar queryKeys tras toda mutación (create/update/delete).
-  Convención de keys observada: `['citas', userId]`, `['user-completo', userId]`,
-  `['slots', medicoId, especialidadId, servicioId, fechaISO]`, `['notificaciones', medicoId]`.
-- Slots de citas: el cálculo vive en el backend (`GET /citas/slots-disponibles`, formato
-  `"HH:MM"` 24h). No recalcular franjas en el frontend.
-- Guards de ruta: `ProtectedRoute` (paciente), `MedicoProtectedRoute` (rol `medico`).
-  `RoleRoute` existe pero no está cableado en `routes.tsx`.
-- ⚠ `pages/admin/*` NO está registrado en `routes.tsx` y llama funciones/tipos inexistentes
-  en `apiClient.ts`/`types/index.ts`. Compila por casts `as any`; no darlo por funcional.
-- Login real del frontend: `POST /auth/login/documento` (por documento, no por correo).
-  LoginPage.tsx extrae `rol` de la respuesta y redirige a `/medico/dashboard` si
-  `userRol?.toLowerCase() === 'medico'`. MedicoLoginPage usa la misma comparación
-  case-insensitive. El `rol` se normaliza a minúsculas en la store (`setRol(rol.toLowerCase())`).
-  2FA y recuperación de contraseña existen en backend sin UI.
-- Chat IA: respuestas en Markdown renderizadas con `react-markdown`;
-  `ChatResponse.clasificacion` llega como **objeto** en `msg.action` (no string);
-  pasar `userId` del store a `aiApi.chat(mensaje, conversacion_id?, usuario_id?)`.
+- Estado de sesión: `app/stores/authStore.ts` (Zustand + persist) — tokens JWT, userId, rol, medicoId en localStorage. `logout()` resetea todo.
+- Cliente API único: `app/lib/apiClient.ts` — 6 instancias Axios (auth/user/citas/catálogo/ai/notificaciones), **todas con interceptor** Bearer + `X-User-ID`. 401 → `logout()` + redirect `/login`.
+- ⚠ URLs base hardcodeadas por hostname en `apiClient.ts`. El `.env` con `VITE_*_URL` **no se lee**.
+- Perfil: **PUT** (no PATCH). Disponibilidad usa campo `activo` (backend); tipo TS `Servicio.disponible` no existe en backend.
+- TanStack Query: invalidar keys tras mutaciones. Slots: cálculo en backend, no recalcular en frontend.
+- Guards: `ProtectedRoute` (paciente), `MedicoProtectedRoute` (rol `medico`). `pages/admin/*` no registrado, compila por casts `as any`.
+- Login: `POST /auth/login/documento`. Redirige a `/medico/dashboard` si `rol.toLowerCase() === 'medico'`.
+- Chat IA: `aiApi.chat(mensaje, conversacion_id?, usuario_id?)`. `ChatResponse.clasificacion` es **objeto** en `msg.action` (no string).
 
 ---
 
-## Chatbot AI-NLP: contrato de tools
+## Chatbot AI-NLP: arquitectura y contrato
 
-Flujo de agendado conversacional (function calling contra servicios reales):
-`obtener_especialidades()` → usuario elige → `obtener_medicos(especialidad_id)` →
-`obtener_sedes()` → fecha/hora → confirmar → `agendar_cita(...)`.
+### Estructura del servicio (post-Fase 1)
+```
+app/
+├── core/llm_provider.py    # LLMProviderFactory con fallback multi-provider
+├── agents/
+│   ├── tools.py            # Tool dispatch + definiciones (5 tools HTTP)
+│   └── triage/
+│       ├── models/output.py  # RedFlagDetection, TriageAnalysis
+│       └── prompt.py         # System prompt con knowledge inyectada
+├── knowledge/triage_guide.json  # Base de conocimiento de triaje
+├── main.py                 # Endpoints (POST /chat + 4 GET)
+├── models.py               # SQLAlchemy: conversacion, mensaje, clasificacion_sintomas
+├── schemas.py              # Pydantic: ChatRequest/Response, ClasificacionSintomasResponse
+├── crud.py                 # CRUD de conversaciones y mensajes
+├── prompts.py              # Prompts legacy (se mantiene por compatibilidad)
+└── database.py             # Engine/session desde DATABASE_URL
+```
 
-Endpoints correctos del Catalog Service para las tools:
+### LLMProviderFactory (fallback automático)
+Orden de prioridad: **Gemini Flash → Groq Llama 3.3 70B → Cerebras Llama 3.1 8B → Mistral**
+- Si un proveedor retorna 429/5xx, pasa al siguiente automáticamente
+- Mínimo 1 proveedor requerido (GROQ_API_KEY ya existe)
+- Proveedores opcionales: GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY
+
+### Contrato Frontend → Backend
+Frontend solo usa `aiApi.chat(mensaje, conversacion_id?, usuario_id?)` → `POST /chat`.
+Respuesta: `{ respuesta, conversacion_id, clasificacion }` (sin cambios).
+
+### Tools del asistente (function calling)
+Flujo: `obtener_especialidades()` → `obtener_medicos(especialidad_id)` → `obtener_sedes()` → confirmar → `agendar_cita(...)`
+
+Endpoints correctos del Catalog Service:
 - `/especialidades`
 - `/especialidades/{especialidad_id}/medicos` (NO `/medicos?especialidad_id=`)
 - `/sedes`
@@ -219,10 +225,9 @@ Endpoints correctos del Catalog Service para las tools:
 Y para agendar: `POST {CITAS_SERVICE_URL}/citas` con header `X-User-ID`.
 
 Notas:
-- Modelo Groq `llama-3.3-70b-versatile`; `chat_completion` usa `max_tokens=400`.
-- Errores y confirmaciones SIEMPRE en lenguaje natural, sin UUIDs ni tecnicismos
-  (`groq_client.py` ya formatea; `prompts.py` controla estilo y longitud).
 - `obtener_disponibilidad_citas` es simulada (cupos fijos); el resto consulta servicios reales.
+- Errores y confirmaciones SIEMPRE en lenguaje natural, sin UUIDs ni tecnicismos.
+- Knowledge base: `app/knowledge/triage_guide.json` (8 especialidades, banderas rojas, Resolución 5596).
 
 ---
 
@@ -236,7 +241,10 @@ Notas:
 | `CATALOG_SERVICE_URL` | citas, ai-nlp | médicos disponibles, especialidades, sedes |
 | `NOTIFICATIONS_SERVICE_URL` | citas | notificaciones internas al agendar (`POST /notificaciones`) |
 | `CITAS_SERVICE_URL` | ai-nlp | agendado real desde el chat |
-| `GROQ_API_KEY` | ai-nlp | cliente LLM |
+| `GROQ_API_KEY` | ai-nlp | cliente LLM (fallback principal) |
+| `GEMINI_API_KEY` | ai-nlp | Google Gemini Flash (prioridad 1, opcional) |
+| `CEREBRAS_API_KEY` | ai-nlp | Cerebras AI (prioridad 3, opcional) |
+| `MISTRAL_API_KEY` | ai-nlp | Mistral AI (prioridad 4, opcional) |
 | `RABBITMQ_URL` | auth, notifications | broker AMQP (fallback hardcodeado: rotar credenciales) |
 | `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL`/`EMAIL_FROM` | notifications | envío de correos |
 
@@ -284,6 +292,7 @@ Notas:
 | `services/auth-service/app/auth.py` | JWT, bcrypt, bloqueos, 2FA, recuperación |
 | `services/appointments-service/app/crud.py` | Citas, slots, zona horaria Bogotá, métricas |
 | `services/catalog-service/app/crud.py` | Disponibilidad de médicos y borrado lógico |
-| `services/ai-nlp-service/app/groq_client.py` | Tools del asistente y llamadas inter-servicio |
-| `services/ai-nlp-service/app/prompts.py` | SYSTEM_PROMPT: tono, formato Markdown, límites |
+| `services/ai-nlp-service/app/core/llm_provider.py` | LLMProviderFactory con fallback multi-provider |
+| `services/ai-nlp-service/app/agents/tools.py` | Tool dispatch y definiciones de function calling |
+| `services/ai-nlp-service/app/knowledge/triage_guide.json` | Base de conocimiento de triaje (8 especialidades) |
 | `services/notifications-service/app/consumer.py` | Colas RabbitMQ y despacho de plantillas |

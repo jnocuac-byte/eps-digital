@@ -1,74 +1,74 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
 
-from .groq_client import chat_completion, clasificar_sintomas, configurar_groq, ejecutar_funcion
+from .core import LLMProviderFactory, Orchestrator, get_llm_factory, init_llm_factory
 
 logger = logging.getLogger(__name__)
+
 from app.crud import (
-	cerrar_conversacion,
-	crear_clasificacion,
-	crear_conversacion,
-	crear_mensaje,
-	get_clasificacion_by_conversacion,
-	get_conversacion,
-	get_conversaciones_by_usuario,
-	get_mensajes_by_conversacion,
+    cerrar_conversacion,
+    crear_clasificacion,
+    crear_conversacion,
+    crear_mensaje,
+    get_clasificacion_by_conversacion,
+    get_conversacion,
+    get_conversaciones_by_usuario,
+    get_mensajes_by_conversacion,
 )
 from .database import get_db, Base, engine
-from .prompts import get_assistant_tools
 from .schemas import (
-	ChatRequest,
-	ChatResponse,
-	ClasificacionSintomasResponse,
-	ConversacionResponse,
-	MensajeResponse,
+    ChatRequest,
+    ChatResponse,
+    ClasificacionSintomasResponse,
+    ConversacionResponse,
+    MensajeResponse,
 )
 
 from fastapi.middleware.cors import CORSMiddleware
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-	"""Inicializa recursos globales del servicio al arrancar."""
-	try:
-		Base.metadata.create_all(bind=engine)
-	except Exception as exc:
-		raise RuntimeError(f"Error al inicializar la base de datos: ") from exc
+    """Inicializa recursos globales del servicio al arrancar."""
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as exc:
+        raise RuntimeError(f"Error al inicializar la base de datos: ") from exc
 
-	app.state.openai_ready = False
-	app.state.openai_error = ""
-	app.state.citas_service_url = None
+    # Inicializar factory de proveedores LLM
+    try:
+        app.state.llm_factory = init_llm_factory()
+    except ValueError as exc:
+        logger.warning(f"LLMProviderFactory no disponible: {exc}")
+        app.state.llm_factory = None
 
-	try:
-		configurar_groq()
-		app.state.openai_ready = True
-	except ValueError as exc:
-		app.state.openai_error = str(exc)
+    # Inicializar orquestador multi-agente
+    if app.state.llm_factory:
+        app.state.orchestrator = Orchestrator(app.state.llm_factory)
+    else:
+        app.state.orchestrator = None
 
-	citas_url = os.getenv("CITAS_SERVICE_URL")
-	if citas_url:
-		app.state.citas_service_url = citas_url
-		logger.info(f"Citas Service URL configurado: {citas_url}")
-	else:
-		logger.warning("CITAS_SERVICE_URL no configurado. Funciones de citas no disponibles.")
+    # URL del servicio de citas
+    app.state.citas_service_url = os.getenv("CITAS_SERVICE_URL")
+    if app.state.citas_service_url:
+        logger.info(f"Citas Service URL configurado: {app.state.citas_service_url}")
 
-	yield
+    yield
 
 
 app = FastAPI(
-	title="AI/NLP Service",
-	description="Servicio de chat y clasificacion de sintomas para EPS.",
-	version="1.0.0",
-	lifespan=lifespan,
+    title="AI/NLP Service",
+    description="Servicio de chat y clasificacion de sintomas para EPS.",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 origins = [
@@ -87,238 +87,218 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-User-ID"],
-	max_age=600,
+    max_age=600,
 )
 
-def _asegurar_openai_disponible() -> None:
-	"""Valida que Groq este configurado antes de invocar funciones de IA."""
-	if not app.state.openai_ready:
-		detalle = app.state.openai_error or "Groq no esta configurado."
-		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detalle)
 
-
-def _es_mensaje_relevante_para_clasificacion(mensaje: str) -> bool:
-	"""Heuristica simple para decidir si intentar clasificacion de sintomas."""
-	texto = mensaje.lower().strip()
-	if len(texto) < 8:
-		return False
-
-	palabras_clave = [
-		"dolor",
-		"fiebre",
-		"tos",
-		"sangrado",
-		"mareo",
-		"vomito",
-		"nausea",
-		"presion",
-		"respirar",
-		"sintoma",
-	]
-	return any(palabra in texto for palabra in palabras_clave)
+def _asegurar_llm_disponible() -> LLMProviderFactory:
+    """Valida que el factory LLM esté configurado."""
+    factory = getattr(app.state, "llm_factory", None)
+    if factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Proveedor LLM no configurado. Verifica GROQ_API_KEY o GEMINI_API_KEY.",
+        )
+    return factory
 
 
 def _mapear_historial_a_mensajes_llm(mensajes_db: list[Any]) -> list[dict[str, str]]:
     """Convierte mensajes persistidos al formato role/content del modelo."""
     history: list[dict[str, str]] = []
     for mensaje in mensajes_db:
-        # Normalizar roles para Groq/OpenAI
         if mensaje.remitente == "usuario":
             role = "user"
         elif mensaje.remitente == "asistente":
             role = "assistant"
         else:
-            role = "user"  # fallback seguro
-        
-        history.append({
-            "role": role,
-            "content": mensaje.contenido,
-        })
+            role = "user"
+
+        history.append({"role": role, "content": mensaje.contenido})
     return history
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])
-def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
-	"""Gestiona el flujo conversacional con persistencia y clasificacion opcional."""
-	_asegurar_openai_disponible()
+async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
+    """Gestiona el flujo conversacional con orquestador multi-agente."""
+    factory = _asegurar_llm_disponible()
+    orchestrator = getattr(app.state, "orchestrator", None)
+    if orchestrator is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Orquestador no disponible.",
+        )
 
-	try:
-		if payload.conversacion_id is None:
-			usuario_id = payload.usuario_id or UUID("00000000-0000-0000-0000-000000000000")
-			conversacion = crear_conversacion(db, usuario_id=usuario_id)
-		else:
-			conversacion = get_conversacion(db, payload.conversacion_id)
-			if conversacion is None:
-				raise HTTPException(
-					status_code=status.HTTP_404_NOT_FOUND,
-					detail="Conversacion no encontrada",
-				)
+    try:
+        # 1. Gestionar conversación
+        if payload.conversacion_id is None:
+            usuario_id = payload.usuario_id or UUID(
+                "00000000-0000-0000-0000-000000000000"
+            )
+            conversacion = crear_conversacion(db, usuario_id=usuario_id)
+        else:
+            conversacion = get_conversacion(db, payload.conversacion_id)
+            if conversacion is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Conversacion no encontrada",
+                )
 
-		crear_mensaje(
-			db,
-			conversacion_id=conversacion.conversacion_id,
-			remitente="usuario",
-			contenido=payload.mensaje,
-		)
+        # 2. Persistir mensaje del usuario
+        crear_mensaje(
+            db,
+            conversacion_id=conversacion.conversacion_id,
+            remitente="usuario",
+            contenido=payload.mensaje,
+        )
 
-		historial = get_mensajes_by_conversacion(db, conversacion.conversacion_id, limit=6)
-		messages = _mapear_historial_a_mensajes_llm(historial)
+        # 3. Construir historial (sliding window de 6 mensajes)
+        historial_db = get_mensajes_by_conversacion(
+            db, conversacion.conversacion_id, limit=6
+        )
+        history = _mapear_historial_a_mensajes_llm(historial_db)
 
-		if payload.usuario_id:
-			messages.insert(0, {
-				"role": "system",
-				"content": f"El usuario actual esta autenticado. Su ID es: {payload.usuario_id}. Usa este ID cuando llames a funciones que requieran usuario_id.",
-			})
+        # 4. Procesar con el orquestador multi-agente
+        usuario_id_str = str(payload.usuario_id) if payload.usuario_id else None
+        respuesta_texto, state = await orchestrator.process(
+            conversation_id=str(conversacion.conversacion_id),
+            message=payload.mensaje,
+            history=history,
+            usuario_id=usuario_id_str,
+        )
 
-		tools = get_assistant_tools()
-		logger.info(f"Enviando chat con {len(messages)} mensajes y {len(tools)} tools disponibles")
-		respuesta_texto, tool_calls = chat_completion(
-			messages=messages,
-			tools=tools,
-		)
-		logger.info(f"Respuesta inicial: {respuesta_texto[:200]}... | tool_calls: {tool_calls}")
+        # 5. Persistir respuesta del asistente
+        crear_mensaje(
+            db,
+            conversacion_id=conversacion.conversacion_id,
+            remitente="asistente",
+            contenido=respuesta_texto,
+        )
 
-		if tool_calls:
-			logger.info(f"Se detectaron {len(tool_calls)} tool_calls, ejecutando...")
-			for tc in tool_calls:
-				try:
-					arguments = json.loads(tc["arguments"]) if isinstance(tc["arguments"], str) else tc["arguments"]
-				except json.JSONDecodeError:
-					arguments = {}
+        # 6. Construir clasificación desde el estado del orquestador
+        clasificacion_response: ClasificacionSintomasResponse | None = None
+        if state.urgency_level and state.specialty_name:
+            try:
+                existente = get_clasificacion_by_conversacion(
+                    db, conversacion.conversacion_id
+                )
+                if existente is None:
+                    nueva = crear_clasificacion(
+                        db,
+                        {
+                            "conversacion_id": conversacion.conversacion_id,
+                            "terminos_identificados": (
+                                [state.symptoms_summary]
+                                if state.symptoms_summary
+                                else None
+                            ),
+                            "especialidad_sugerida": state.specialty_name,
+                            "nivel_urgencia": state.urgency_level,
+                            "confianza_modelo": 0.85,
+                        },
+                    )
+                    clasificacion_response = (
+                        ClasificacionSintomasResponse.model_validate(nueva)
+                    )
+                else:
+                    existente.especialidad_sugerida = state.specialty_name
+                    existente.nivel_urgencia = state.urgency_level
+                    if state.symptoms_summary:
+                        existente.terminos_identificados = [state.symptoms_summary]
+                    db.commit()
+                    db.refresh(existente)
+                    clasificacion_response = (
+                        ClasificacionSintomasResponse.model_validate(existente)
+                    )
+            except Exception as exc:
+                logger.warning(f"Error guardando clasificación: {exc}")
 
-				logger.info(f"Ejecutando tool: {tc['name']} con args: {arguments}")
-				resultado = ejecutar_funcion(tc["name"], arguments)
-				logger.info(f"Resultado tool: {resultado}")
+        return ChatResponse(
+            respuesta=respuesta_texto,
+            conversacion_id=conversacion.conversacion_id,
+            clasificacion=clasificacion_response,
+        )
 
-				messages.append({
-					"role": "assistant",
-					"tool_calls": [{
-						"id": tc["id"],
-						"type": "function",
-						"function": {
-							"name": tc["name"],
-							"arguments": tc["arguments"],
-						}
-					}]
-				})
-				messages.append({
-					"role": "tool",
-					"tool_call_id": tc["id"],
-					"content": json.dumps(resultado),
-				})
-
-			respuesta_final, _ = chat_completion(messages=messages, tools=None)
-			if respuesta_final:
-				respuesta_texto = respuesta_final
-
-		crear_mensaje(
-			db,
-			conversacion_id=conversacion.conversacion_id,
-			remitente="asistente",
-			contenido=respuesta_texto,
-		)
-
-		clasificacion_response: ClasificacionSintomasResponse | None = None
-		if _es_mensaje_relevante_para_clasificacion(payload.mensaje):
-			clasificacion_json = clasificar_sintomas(payload.mensaje)
-			confianza = clasificacion_json.get("confianza")
-			confianza_modelo = float(confianza) if confianza is not None else None
-
-			existente = get_clasificacion_by_conversacion(db, conversacion.conversacion_id)
-			if existente is None:
-				nueva_clasificacion = crear_clasificacion(
-					db,
-					{
-						"conversacion_id": conversacion.conversacion_id,
-						"terminos_identificados": clasificacion_json.get("terminos_identificados"),
-						"especialidad_sugerida": clasificacion_json.get("especialidad_sugerida"),
-						"nivel_urgencia": clasificacion_json.get("nivel_urgencia") or "programable",
-						"confianza_modelo": confianza_modelo,
-					},
-				)
-				clasificacion_response = ClasificacionSintomasResponse.model_validate(
-					nueva_clasificacion
-				)
-			else:
-				# Actualiza clasificacion existente por tratarse de relacion 1:1.
-				existente.terminos_identificados = clasificacion_json.get("terminos_identificados")
-				existente.especialidad_sugerida = clasificacion_json.get("especialidad_sugerida")
-				existente.nivel_urgencia = clasificacion_json.get("nivel_urgencia") or "programable"
-				existente.confianza_modelo = (
-					Decimal(str(confianza_modelo)) if confianza_modelo is not None else None
-				)
-				db.commit()
-				db.refresh(existente)
-				clasificacion_response = ClasificacionSintomasResponse.model_validate(existente)
-
-		return ChatResponse(
-			respuesta=respuesta_texto,
-			conversacion_id=conversacion.conversacion_id,
-			clasificacion=clasificacion_response,
-		)
-
-	except HTTPException:
-		raise
-	except RuntimeError as exc:
-		# Errores encapsulados del cliente Groq.
-		raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-	except Exception as exc:
-		raise HTTPException(
-			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-			detail=f"Error interno en /chat: {exc}",
-		) from exc
-
-
-@app.get("/chat/conversaciones/{usuario_id}", response_model=list[ConversacionResponse], tags=["chat"])
-def listar_conversaciones(usuario_id: UUID, db: Session = Depends(get_db)) -> list[ConversacionResponse]:
-	"""Lista conversaciones de un usuario."""
-	conversaciones = get_conversaciones_by_usuario(db, usuario_id=usuario_id)
-	return [ConversacionResponse.model_validate(c) for c in conversaciones]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno en /chat: {exc}",
+        ) from exc
 
 
 @app.get(
-	"/chat/conversacion/{conversacion_id}/mensajes",
-	response_model=list[MensajeResponse],
-	tags=["chat"],
+    "/chat/conversaciones/{usuario_id}",
+    response_model=list[ConversacionResponse],
+    tags=["chat"],
 )
-def listar_mensajes(conversacion_id: UUID, db: Session = Depends(get_db)) -> list[MensajeResponse]:
-	"""Lista mensajes de una conversacion."""
-	conversacion = get_conversacion(db, conversacion_id)
-	if conversacion is None:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversacion no encontrada")
+def listar_conversaciones(
+    usuario_id: UUID, db: Session = Depends(get_db)
+) -> list[ConversacionResponse]:
+    """Lista conversaciones de un usuario."""
+    conversaciones = get_conversaciones_by_usuario(db, usuario_id=usuario_id)
+    return [ConversacionResponse.model_validate(c) for c in conversaciones]
 
-	mensajes = get_mensajes_by_conversacion(db, conversacion_id=conversacion_id)
-	return [MensajeResponse.model_validate(m) for m in mensajes]
+
+@app.get(
+    "/chat/conversacion/{conversacion_id}/mensajes",
+    response_model=list[MensajeResponse],
+    tags=["chat"],
+)
+def listar_mensajes(
+    conversacion_id: UUID, db: Session = Depends(get_db)
+) -> list[MensajeResponse]:
+    """Lista mensajes de una conversacion."""
+    conversacion = get_conversacion(db, conversacion_id)
+    if conversacion is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversacion no encontrada",
+        )
+
+    mensajes = get_mensajes_by_conversacion(
+        db, conversacion_id=conversacion_id
+    )
+    return [MensajeResponse.model_validate(m) for m in mensajes]
 
 
 @app.post(
-	"/chat/conversacion/{conversacion_id}/cerrar",
-	response_model=ConversacionResponse,
-	tags=["chat"],
+    "/chat/conversacion/{conversacion_id}/cerrar",
+    response_model=ConversacionResponse,
+    tags=["chat"],
 )
-def cerrar_chat_conversacion(conversacion_id: UUID, db: Session = Depends(get_db)) -> ConversacionResponse:
-	"""Cierra una conversacion activa."""
-	try:
-		conversacion = cerrar_conversacion(db, conversacion_id)
-	except ValueError as exc:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+def cerrar_chat_conversacion(
+    conversacion_id: UUID, db: Session = Depends(get_db)
+) -> ConversacionResponse:
+    """Cierra una conversacion activa."""
+    try:
+        conversacion = cerrar_conversacion(db, conversacion_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
 
-	return ConversacionResponse.model_validate(conversacion)
+    return ConversacionResponse.model_validate(conversacion)
 
 
 @app.get(
-	"/chat/clasificacion/{conversacion_id}",
-	response_model=ClasificacionSintomasResponse | None,
-	tags=["chat"],
+    "/chat/clasificacion/{conversacion_id}",
+    response_model=ClasificacionSintomasResponse | None,
+    tags=["chat"],
 )
-def get_clasificacion(conversacion_id: UUID, db: Session = Depends(get_db)) -> ClasificacionSintomasResponse | None:
-	"""Obtiene la clasificacion de sintomas de una conversacion."""
-	conversacion = get_conversacion(db, conversacion_id)
-	if conversacion is None:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversacion no encontrada")
+def get_clasificacion(
+    conversacion_id: UUID, db: Session = Depends(get_db)
+) -> ClasificacionSintomasResponse | None:
+    """Obtiene la clasificacion de sintomas de una conversacion."""
+    conversacion = get_conversacion(db, conversacion_id)
+    if conversacion is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversacion no encontrada",
+        )
 
-	clasificacion = get_clasificacion_by_conversacion(db, conversacion_id)
-	if clasificacion is None:
-		return None
+    clasificacion = get_clasificacion_by_conversacion(db, conversacion_id)
+    if clasificacion is None:
+        return None
 
-	return ClasificacionSintomasResponse.model_validate(clasificacion)
+    return ClasificacionSintomasResponse.model_validate(clasificacion)

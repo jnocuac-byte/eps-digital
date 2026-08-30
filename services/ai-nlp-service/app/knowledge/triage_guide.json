@@ -1,0 +1,182 @@
+{
+  "protocolo_triaje": {
+    "version": "1.0",
+    "descripcion": "Guía de triaje y orientación médica de EPS Digital",
+    "fuente": "Resolución 5596 de 2013 - Manual de Arreglos Institucionales",
+    "niveles_urgencia": {
+      "urgente": {
+        "nivel": 1,
+        "accion_inmediata": "REMITIR_A_URGENCIAS",
+        "tiempo_respuesta": "Inmediato",
+        "descripcion": "Riesgo vital inminente o condición que puede deteriorarse rápidamente."
+      },
+      "prioritario": {
+        "nivel": 2,
+        "accion_inmediata": "CITA_PRIORITARIA_48H",
+        "tiempo_respuesta": "24-48 horas",
+        "descripcion": "Condición aguda que no compromete la vida pero requiere atención pronta."
+      },
+      "programable": {
+        "nivel": 3,
+        "accion_inmediata": "CITA_EXTERNA",
+        "tiempo_respuesta": "1-2 semanas",
+        "descripcion": "Condición crónica, preventiva o sintomatología leve que se atiende por consulta externa."
+      }
+    }
+  },
+  "especialidades_catalogo": [
+    {
+      "id": "medicina_general",
+      "nombre": "Medicina General",
+      "descripcion": "Puerta de entrada al sistema de salud para sintomatología común no aguda, prevención y chequeos.",
+      "ejemplos_sintomas": [
+        "cuadro gripal",
+        "fiebre moderada",
+        "dolor abdominal leve",
+        "chequeo de rutina",
+        "dolor articular leve",
+        "malestar general"
+      ],
+      "criterio_derivacion": "Síntomas iniciales sin compromiso orgánico severo.",
+      "red_flags": []
+    },
+    {
+      "id": "cardiologia",
+      "nombre": "Cardiología",
+      "descripcion": "Diagnóstico y tratamiento de enfermedades del corazón y sistema circulatorio.",
+      "ejemplos_sintomas": [
+        "palpitaciones",
+        "hipertensión descontrolada",
+        "fatiga inusual al caminar",
+        "dolor en el pecho leve al hacer ejercicio"
+      ],
+      "criterio_derivacion": "Antecedentes o sospecha de patología cardiovascular crónica.",
+      "red_flags": [
+        "dolor torácico opresivo que se irradia a brazo izquierdo, cuello o mandíbula",
+        "dificultad respiratoria repentina con dolor torácico"
+      ]
+    },
+    {
+      "id": "pediatria",
+      "nombre": "Pediatría",
+      "descripcion": "Atención médica especializada para bebés, niños y adolescentes (0 a 17 años).",
+      "ejemplos_sintomas": [
+        "infecciones infantiles",
+        "fiebre en niños",
+        "controles de crecimiento",
+        "vacunación",
+        "dolor de garganta en niños"
+      ],
+      "criterio_derivacion": "Pacientes menores de 18 años con cualquier patología común.",
+      "red_flags": [
+        "fiebre alta (>39°C) en recién nacidos menores de 3 meses",
+        "convulsiones febriles en niños"
+      ]
+    },
+    {
+      "id": "neurologia",
+      "nombre": "Neurología",
+      "descripcion": "Diagnóstico y tratamiento de enfermedades del sistema nervioso central y periférico.",
+      "ejemplos_sintomas": [
+        "dolor de cabeza recurrente",
+        "mareos persistentes",
+        "hormigueo en extremidades",
+        "insomnio crónico",
+        "pérdida de memoria leve"
+      ],
+      "criterio_derivacion": "Sintomatología neurológica recurrente o progresiva.",
+      "red_flags": [
+        "pérdida súbita de conciencia o confusión severa",
+        "pérdida de fuerza en cara o extremidades (sospecha de ACV)",
+        "convulsiones sin fiebre previa"
+      ]
+    },
+    {
+      "id": "ginecologia",
+      "nombre": "Ginecología",
+      "descripcion": "Atención de la salud reproductiva y genital femenina.",
+      "ejemplos_sintomas": [
+        "dolor pélvico",
+        "irregularidades menstruales",
+        "dolor durante relaciones",
+        "control de anticonceptivos",
+        "chequeo ginecológico de rutina"
+      ],
+      "criterio_derivacion": "Sintomatología ginecológica o necesidad de control preventivo.",
+      "red_flags": [
+        "sangrado vaginal abundante no asociado a menstruación",
+        "dolor pélvico agudo con fiebre"
+      ]
+    },
+    {
+      "id": "oftalmologia",
+      "nombre": "Oftalmología",
+      "descripcion": "Diagnóstico y tratamiento de enfermedades de los ojos y visión.",
+      "ejemplos_sintomas": [
+        "dolor ocular",
+        "enrojecimiento ocular",
+        "visión borrosa leve",
+        "ojo seco",
+        "cansancio visual"
+      ],
+      "criterio_derivacion": "Sintomatología ocular no urgente.",
+      "red_flags": [
+        "pérdida súbita de visión en un ojo",
+        "dolor ocular intenso con halos de luz"
+      ]
+    },
+    {
+      "id": "odontologia",
+      "nombre": "Odontología",
+      "descripcion": "Atención dental preventiva y curativa.",
+      "ejemplos_sintomas": [
+        "dolor dental",
+        "sangrado de encías",
+        "caries",
+        "mal aliento persistente",
+        "revisión dental de rutina"
+      ],
+      "criterio_derivacion": "Sintomatología dental no urgente.",
+      "red_flags": [
+        "absceso dental con dificultad para tragar o respirar",
+        "sangrado dental incontrolable"
+      ]
+    },
+    {
+      "id": "dermatologia",
+      "nombre": "Dermatología",
+      "descripcion": "Atención de condiciones de la piel, cabello y uñas.",
+      "ejemplos_sintomas": [
+        "erupciones cutáneas",
+        "lunares sospechosos",
+        "alergias en la piel",
+        "acné severo",
+        "picazón persistente"
+      ],
+      "criterio_derivacion": "Lesiones visibles o sintomatología dermatológica no urgente.",
+      "red_flags": [
+        "erupción cutánea con dificultad para respirar (anafilaxia)",
+        "quemaduras extensas"
+      ]
+    }
+  ],
+  "criterios_banderas_rojas": [
+    "Dolor torácico opresivo que se irradia a brazo izquierdo, cuello o mandíbula.",
+    "Dificultad respiratoria severa o sensación de ahogo repentino.",
+    "Pérdida súbita de conciencia, confusión severa o desmayo.",
+    "Pérdida de fuerza en la cara o extremidades (sospecha de ACV).",
+    "Sangrado incontrolable o hemorragia masiva.",
+    "Fiebre alta (>39°C) en recién nacidos menores de 3 meses.",
+    "Convulsiones sin causa conocida.",
+    "Reacción alérgica severa con hinchazón de garganta.",
+    "Traumatismo craneal con pérdida de conciencia."
+  ],
+  "reglas_negocio": {
+    "maximo_caracteres_entrada": 1000,
+    "maximo_historial_contexto": 6,
+    "orientacion_solamente": true,
+    "prohibido_diagnosticos": true,
+    "prohibido_recetas": true,
+    "mensaje_emergencia": "Si presentas alguno de estos síntomas, acude inmediatamente a urgencias o llama a la línea 123."
+  }
+}
