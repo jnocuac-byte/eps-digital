@@ -32,6 +32,7 @@ class Conversacion(Base):
 		DateTime(timezone=True), nullable=False, default=utc_now
 	)
 	cerrada_en: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+	estado_orquestador: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 	# Relacion 1:N con mensajes de la conversacion.
 	mensajes: Mapped[list[Mensaje]] = relationship(

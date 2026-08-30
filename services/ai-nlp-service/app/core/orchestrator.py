@@ -5,6 +5,8 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from .conversation_state import ConversationState, classify_intent
 from .llm_provider import LLMProviderFactory, AllProvidersFailedError
 
@@ -30,6 +32,13 @@ _TOOL_CALL_PATTERN = re.compile(
 
 _TOOL_NAME_PATTERN = re.compile(r'"name"\s*:\s*"([^"]+)"')
 _TOOL_PARAMS_PATTERN = re.compile(r'"params"\s*:\s*(\{[^}]*\})')
+
+_RESPUESTA_BLOCK_PATTERN = re.compile(
+    r"\[RESPUESTA\]\s*\n(.*?)(?=\n\[CLASIFICACION\]|\Z)", re.DOTALL
+)
+_CLASIFICACION_BLOCK_PATTERN = re.compile(
+    r"\[CLASIFICACION\]\s*\n(\{.*\})", re.DOTALL
+)
 
 
 def _extraer_tool_call(texto: str) -> dict[str, Any] | None:
@@ -67,6 +76,58 @@ def _detectar_handoff(respuesta: str) -> bool:
     return any(s in respuesta_lower for s in _HANDOFF_SIGNALS)
 
 
+def _extraer_respuesta_bloque(texto: str) -> str:
+    """Extrae el contenido del bloque [RESPUESTA] del texto del LLM.
+
+    Si el formato [RESPUESTA]...\n[CLASIFICACION]... está presente, retorna solo
+    el texto del bloque [RESPUESTA]. Si no, retorna el texto completo tal cual
+    (compatible con respuestas legacy sin formato de bloques).
+    """
+    match = _RESPUESTA_BLOCK_PATTERN.search(texto)
+    if match:
+        return match.group(1).strip()
+    return texto.strip()
+
+
+def _extraer_clasificacion_bloque(texto: str) -> dict | None:
+    """Extrae y parsea el JSON del bloque [CLASIFICACION] del texto del LLM.
+
+    Intenta en orden:
+    1. Buscar bloque [CLASIFICACION] con regex
+    2. Buscar JSON embebido entre llaves (fallback legacy)
+    3. Retornar None si no se pudo parsear
+    """
+    # Intento 1: bloque [CLASIFICACION] explícito
+    match = _CLASIFICACION_BLOCK_PATTERN.search(texto)
+    if match:
+        try:
+            parsed = json.loads(match.group(1))
+            if isinstance(parsed, dict) and "nivel_urgencia" in parsed:
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    # Intento 2: JSON embebido entre llaves (fallback para respuestas legacy)
+    try:
+        parsed = json.loads(texto)
+        if isinstance(parsed, dict) and "nivel_urgencia" in parsed:
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    inicio = texto.find("{")
+    fin = texto.rfind("}")
+    if inicio != -1 and fin > inicio:
+        try:
+            parsed = json.loads(texto[inicio : fin + 1])
+            if isinstance(parsed, dict) and "nivel_urgencia" in parsed:
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
 class Orchestrator:
     """Máquina de estados que enruta conversaciones entre TriageAgent y SchedulingAgent."""
 
@@ -90,11 +151,50 @@ class Orchestrator:
             self._scheduling_prompt = SCHEDULING_SYSTEM_PROMPT
         return self._scheduling_prompt
 
-    def get_state(self, conversation_id: str) -> ConversationState:
-        """Recupera el estado de una conversación o crea uno nuevo."""
+    def get_state(
+        self, conversation_id: str, db: Session | None = None
+    ) -> ConversationState:
+        """Recupera el estado de una conversación o crea uno nuevo.
+
+        Si db se provee y el state no está en memoria, intenta rehidratar
+        desde la columna estado_orquestador de la BD.
+        """
         if conversation_id not in self._states:
+            # Intentar rehidratar desde la BD
+            if db is not None:
+                from ..crud import cargar_estado_orquestador
+
+                estado_json = cargar_estado_orquestador(db, conversation_id)
+                if estado_json:
+                    try:
+                        data = json.loads(estado_json)
+                        self._states[conversation_id] = ConversationState.from_dict(data)
+                        logger.info(
+                            f"[Orchestrator] Estado rehidratado para conversación {conversation_id}"
+                        )
+                        return self._states[conversation_id]
+                    except (json.JSONDecodeError, KeyError) as exc:
+                        logger.warning(
+                            f"[Orchestrator] Error rehidratando estado: {exc}. "
+                            f"Usando estado vacío."
+                        )
+
             self._states[conversation_id] = ConversationState()
         return self._states[conversation_id]
+
+    def _persist_state(
+        self, conversation_id: str, state: ConversationState, db: Session
+    ) -> None:
+        """Guarda el estado del orquestador en la BD."""
+        from ..crud import guardar_estado_orquestador
+
+        try:
+            estado_json = json.dumps(state.to_dict(), ensure_ascii=False)
+            guardar_estado_orquestador(db, conversation_id, estado_json)
+        except Exception as exc:
+            logger.warning(
+                f"[Orchestrator] Error persistiendo estado para {conversation_id}: {exc}"
+            )
 
     def _build_system_prompt(self, state: ConversationState) -> str:
         """Construye el system prompt según el agente activo, inyectando el contexto."""
@@ -160,7 +260,7 @@ class Orchestrator:
             try:
                 response_text, provider_name = self._factory.complete(
                     messages=messages,
-                    max_tokens=600,
+                    max_tokens=1500,
                 )
                 logger.info(
                     f"[Orchestrator] Iteración {iteration + 1}, "
@@ -177,7 +277,8 @@ class Orchestrator:
             # Buscar tool call en la respuesta
             tool_call = _extraer_tool_call(response_text)
             if not tool_call:
-                return response_text
+                # No hay tool call: extraer bloque [RESPUESTA] si existe
+                return _extraer_respuesta_bloque(response_text)
 
             tool_name = tool_call["name"]
             tool_params = tool_call["params"]
@@ -254,6 +355,7 @@ class Orchestrator:
         message: str,
         history: list[dict[str, str]],
         usuario_id: str | None = None,
+        db: Session | None = None,
     ) -> tuple[str, ConversationState]:
         """Punto de entrada principal del orquestador.
 
@@ -262,11 +364,12 @@ class Orchestrator:
             message: Mensaje actual del usuario.
             history: Historial de mensajes [{role, content}, ...].
             usuario_id: ID del usuario autenticado (opcional).
+            db: Sesión de SQLAlchemy para persistencia del state (opcional).
 
         Returns:
             Tupla (respuesta_texto, estado_actualizado).
         """
-        state = self.get_state(conversation_id)
+        state = self.get_state(conversation_id, db=db)
         state.message_count += 1
 
         # 1. Clasificar intención y posible cambio de agente
@@ -308,7 +411,7 @@ class Orchestrator:
 
         # 5. Extraer clasificación del triage si hay JSON en la respuesta
         if state.active_agent == "triage":
-            clasificacion = self._extraer_clasificacion(response_text)
+            clasificacion = _extraer_clasificacion_bloque(response_text)
             if clasificacion:
                 state.specialty_id = clasificacion.get("especialidad_sugerida_id")
                 state.specialty_name = clasificacion.get("especialidad_sugerida_nombre")
@@ -318,29 +421,8 @@ class Orchestrator:
                     clasificacion.get("red_flag", {}).get("detected", False)
                 )
 
+        # 6. Persistir estado en la BD si hay sesión disponible
+        if db is not None:
+            self._persist_state(conversation_id, state, db)
+
         return response_text, state
-
-    def _extraer_clasificacion(self, texto: str) -> dict | None:
-        """Intenta extraer un JSON de clasificación de síntomas del texto del LLM."""
-        # Intentar parsear como JSON directo
-        try:
-            parsed = json.loads(texto)
-            if isinstance(parsed, dict) and "nivel_urgencia" in parsed:
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-        # Buscar JSON embebido entre llaves
-        inicio = texto.find("{")
-        fin = texto.rfind("}")
-        if inicio == -1 or fin == -1 or fin <= inicio:
-            return None
-
-        try:
-            parsed = json.loads(texto[inicio : fin + 1])
-            if isinstance(parsed, dict) and "nivel_urgencia" in parsed:
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-        return None

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,31 @@ class ConversationState:
         if self.selected_time:
             parts.append(f"Hora seleccionada: {self.selected_time}")
         return "\n".join(parts) if parts else "Sin contexto previo."
+
+    def to_dict(self) -> dict:
+        """Serializa el estado a un diccionario JSON-compatible."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ConversationState:
+        """Reconstruye un ConversationState desde un diccionario serializado."""
+        return cls(
+            active_agent=data.get("active_agent", "idle"),
+            specialty_id=data.get("specialty_id"),
+            specialty_name=data.get("specialty_name"),
+            symptoms_summary=data.get("symptoms_summary"),
+            urgency_level=data.get("urgency_level"),
+            red_flag_detected=data.get("red_flag_detected", False),
+            selected_doctor_id=data.get("selected_doctor_id"),
+            selected_doctor_name=data.get("selected_doctor_name"),
+            selected_sede_id=data.get("selected_sede_id"),
+            selected_sede_name=data.get("selected_sede_name"),
+            selected_date=data.get("selected_date"),
+            selected_time=data.get("selected_time"),
+            pending_confirmation=data.get("pending_confirmation", False),
+            message_count=data.get("message_count", 0),
+            handoff_context=data.get("handoff_context"),
+        )
 
 
 def classify_intent(

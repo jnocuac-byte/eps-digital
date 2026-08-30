@@ -142,6 +142,14 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Conversacion no encontrada",
                 )
+            if conversacion.estado == "cerrada":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "La conversación se encuentra cerrada. "
+                        "Inicie una nueva interacción sin conversacion_id."
+                    ),
+                )
 
         # 2. Persistir mensaje del usuario
         crear_mensaje(
@@ -164,6 +172,7 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
             message=payload.mensaje,
             history=history,
             usuario_id=usuario_id_str,
+            db=db,
         )
 
         # 5. Persistir respuesta del asistente
