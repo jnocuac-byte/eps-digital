@@ -74,13 +74,13 @@ class LLMProvider(ABC):
 
 
 class GroqProvider(LLMProvider):
-    """Proveedor Groq (Llama 3.3 70B)."""
+    """Proveedor Groq (GPT-OSS-120B)."""
 
     def __init__(self, api_key: str):
         from groq import Groq
 
         self._client = Groq(api_key=api_key, timeout=30.0)
-        self._model = "llama-3.1-70b-versatile"
+        self._model = "openai/gpt-oss-120b"
 
     @property
     def name(self) -> str:
@@ -124,7 +124,7 @@ class GeminiProvider(LLMProvider):
         from google import genai
 
         self._client = genai.Client(api_key=api_key)
-        self._model = "gemini-1.5-flash"
+        self._model = "gemini-3.6-flash"
 
     @property
     def name(self) -> str:
@@ -175,13 +175,13 @@ class GeminiProvider(LLMProvider):
 
 
 class CerebrasProvider(LLMProvider):
-    """Proveedor Cerebras AI (Llama 3.1 8B)."""
+    """Proveedor Cerebras AI (GPT-OSS-120B)."""
 
     def __init__(self, api_key: str):
         from cerebras.cloud.sdk import Cerebras
 
         self._client = Cerebras(api_key=api_key)
-        self._model = "llama3.1-8b"
+        self._model = "gpt-oss-120b"
 
     @property
     def name(self) -> str:
