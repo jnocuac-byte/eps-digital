@@ -220,9 +220,18 @@ class MistralProvider(LLMProvider):
     """Proveedor Mistral AI."""
 
     def __init__(self, api_key: str):
-        from mistralai import Mistral
-
-        self._client = Mistral(api_key=api_key)
+        try:
+            from mistralai import MistralClient as _MistralClient
+        except ImportError:
+            try:
+                from mistralai.client import MistralClient as _MistralClient
+            except ImportError:
+                raise LLMProviderError(
+                    "mistral",
+                    "No se pudo importar el SDK de Mistral. "
+                    "Verifica que mistralai esté instalado correctamente.",
+                )
+        self._client = _MistralClient(api_key=api_key)
         self._model = "mistral-small-latest"
 
     @property
@@ -291,7 +300,10 @@ def _build_providers() -> list[LLMProvider]:
 
     mistral_key = os.getenv("MISTRAL_API_KEY", "").strip()
     if mistral_key:
-        providers.append(MistralProvider(api_key=mistral_key))
+        try:
+            providers.append(MistralProvider(api_key=mistral_key))
+        except LLMProviderError as exc:
+            logger.warning(f"Mistral omitido: {exc}")
 
     return providers
 
