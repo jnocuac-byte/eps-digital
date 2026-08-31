@@ -331,7 +331,9 @@ class Orchestrator:
                     "content": (
                         f"[Resultado de la herramienta '{tool_name}']: {result_str}\n\n"
                         f"Ahora responde al usuario en lenguaje natural con base en este resultado. "
-                        f"NO vuelvas a llamar herramientas. Solo responde."
+                        f"Si necesitas más datos del sistema para continuar el flujo de agendamiento "
+                        f"(ej: médicos, sedes, disponibilidad), puedes realizar otro tool_call. "
+                        f"Si ya tienes toda la información necesaria, entrega la respuesta final al usuario."
                     ),
                 }
             )

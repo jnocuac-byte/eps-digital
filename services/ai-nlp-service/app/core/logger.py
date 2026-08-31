@@ -73,4 +73,4 @@ def log_event(
         level: Nivel de log (debug, info, warning, error).
         message: Mensaje descriptivo del evento.
     """
-    logger.bind(module=module, stage=stage).__getattribute__(level)(message)
+    logger.bind(module=module, stage=stage).opt(raw=True).__getattribute__(level)(message)
