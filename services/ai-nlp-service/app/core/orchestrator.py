@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 from typing import Any
 
@@ -9,8 +8,7 @@ from sqlalchemy.orm import Session
 
 from .conversation_state import ConversationState, classify_intent
 from .llm_provider import LLMProviderFactory, AllProvidersFailedError
-
-logger = logging.getLogger(__name__)
+from .logger import log_event
 
 MAX_HISTORY_MESSAGES = 6
 MAX_TOOL_ITERATIONS = 5
@@ -34,10 +32,15 @@ _TOOL_NAME_PATTERN = re.compile(r'"name"\s*:\s*"([^"]+)"')
 _TOOL_PARAMS_PATTERN = re.compile(r'"params"\s*:\s*(\{[^}]*\})')
 
 _RESPUESTA_BLOCK_PATTERN = re.compile(
-    r"\[RESPUESTA\]\s*\n(.*?)(?=\n\[CLASIFICACION\]|\Z)", re.DOTALL
+    r"\[RESPUESTA\]\n(.*?)(?=\n\[CLASIFICACION\]|\Z)", re.DOTALL
 )
 _CLASIFICACION_BLOCK_PATTERN = re.compile(
     r"\[CLASIFICACION\]\s*\n(\{.*\})", re.DOTALL
+)
+
+_RESPUESTA_VACIA_FALLBACK = (
+    "Entiendo tu consulta. Un asistente te podrá ayudar con más detalle. "
+    "¿Podrías darme más información sobre lo que necesitas?"
 )
 
 
@@ -79,14 +82,38 @@ def _detectar_handoff(respuesta: str) -> bool:
 def _extraer_respuesta_bloque(texto: str) -> str:
     """Extrae el contenido del bloque [RESPUESTA] del texto del LLM.
 
-    Si el formato [RESPUESTA]...\n[CLASIFICACION]... está presente, retorna solo
-    el texto del bloque [RESPUESTA]. Si no, retorna el texto completo tal cual
-    (compatible con respuestas legacy sin formato de bloques).
+    Algoritmo de 3 capas:
+    1. Busca bloque [RESPUESTA] con regex → retorna si no está vacío
+    2. Si [RESPUESTA] está vacío, busca texto antes de [CLASIFICACION]
+    3. Si todo está vacío, retorna fallback contextualizado
     """
+    # Capa 1: bloque [RESPUESTA] explícito
     match = _RESPUESTA_BLOCK_PATTERN.search(texto)
     if match:
-        return match.group(1).strip()
-    return texto.strip()
+        contenido = match.group(1).strip()
+        if contenido:
+            log_event("ORCH", "EXTRACT", "debug", f"[RESPUESTA] extraído ({len(contenido)} chars)")
+            return contenido
+        log_event("ORCH", "EXTRACT", "warning", "Bloque [RESPUESTA] encontrado pero vacío")
+
+    # Capa 2: texto antes de [CLASIFICACION] (excluyendo la propia etiqueta)
+    if "[CLASIFICACION]" in texto:
+        partes = texto.split("[CLASIFICACION]", 1)
+        contenido = partes[0].strip()
+        # Limpiar prefijos como [RESPUESTA] sueltos
+        contenido = re.sub(r"^\[RESPUESTA\]\s*\n?", "", contenido).strip()
+        if contenido:
+            log_event("ORCH", "EXTRACT", "debug", f"Texto antes de [CLASIFICACION] extraído ({len(contenido)} chars)")
+            return contenido
+    else:
+        # Sin bloque [CLASIFICACION], el texto completo es la respuesta (legacy)
+        contenido = texto.strip()
+        if contenido:
+            log_event("ORCH", "EXTRACT", "debug", f"Texto legacy extraído ({len(contenido)} chars)")
+            return contenido
+
+    log_event("ORCH", "EXTRACT", "warning", "Respuesta vacía, aplicando fallback")
+    return _RESPUESTA_VACIA_FALLBACK
 
 
 def _extraer_clasificacion_bloque(texto: str) -> dict | None:
@@ -169,14 +196,15 @@ class Orchestrator:
                     try:
                         data = json.loads(estado_json)
                         self._states[conversation_id] = ConversationState.from_dict(data)
-                        logger.info(
-                            f"[Orchestrator] Estado rehidratado para conversación {conversation_id}"
+                        log_event(
+                            "ORCH", "STATE_LOAD", "info",
+                            f"Estado rehidratado para conversación {conversation_id}"
                         )
                         return self._states[conversation_id]
                     except (json.JSONDecodeError, KeyError) as exc:
-                        logger.warning(
-                            f"[Orchestrator] Error rehidratando estado: {exc}. "
-                            f"Usando estado vacío."
+                        log_event(
+                            "ORCH", "STATE_LOAD", "warning",
+                            f"Error rehidratando estado: {exc}. Usando estado vacío."
                         )
 
             self._states[conversation_id] = ConversationState()
@@ -192,8 +220,9 @@ class Orchestrator:
             estado_json = json.dumps(state.to_dict(), ensure_ascii=False)
             guardar_estado_orquestador(db, conversation_id, estado_json)
         except Exception as exc:
-            logger.warning(
-                f"[Orchestrator] Error persistiendo estado para {conversation_id}: {exc}"
+            log_event(
+                "ORCH", "STATE_SAVE", "warning",
+                f"Error persistiendo estado para {conversation_id}: {exc}"
             )
 
     def _build_system_prompt(self, state: ConversationState) -> str:
@@ -262,13 +291,13 @@ class Orchestrator:
                     messages=messages,
                     max_tokens=1500,
                 )
-                logger.info(
-                    f"[Orchestrator] Iteración {iteration + 1}, "
-                    f"provider={provider_name}, "
+                log_event(
+                    "ORCH", "TOOL_LOOP", "info",
+                    f"Iteración {iteration + 1}, provider={provider_name}, "
                     f"response_len={len(response_text)}"
                 )
             except AllProvidersFailedError as exc:
-                logger.error(f"[Orchestrator] Todos los proveedores fallaron: {exc}")
+                log_event("ORCH", "TOOL_LOOP", "error", f"Todos los proveedores fallaron: {exc}")
                 return (
                     "Lo siento, estoy teniendo dificultades técnicas en este momento. "
                     "Por favor, intenta de nuevo en unos minutos."
@@ -282,15 +311,16 @@ class Orchestrator:
 
             tool_name = tool_call["name"]
             tool_params = tool_call["params"]
-            logger.info(
-                f"[Orchestrator] Tool call detectado: {tool_name}({tool_params})"
+            log_event(
+                "ORCH", "TOOL_LOOP", "info",
+                f"Tool call detectado: {tool_name}({tool_params})"
             )
 
             # Ejecutar la tool
             try:
                 result = ejecutar_funcion(tool_name, tool_params)
             except Exception as exc:
-                logger.error(f"[Orchestrator] Error ejecutando {tool_name}: {exc}")
+                log_event("ORCH", "TOOL_LOOP", "error", f"Error ejecutando {tool_name}: {exc}")
                 result = {"ok": False, "error": f"Error interno ejecutando {tool_name}"}
 
             # Alimentar resultado al LLM para que genere respuesta en lenguaje natural
@@ -310,7 +340,7 @@ class Orchestrator:
             self._actualizar_estado_desde_tool(state, tool_name, result)
 
         # Si llegamos aquí, el LLM siguió pidiendo tools después del máximo
-        logger.warning("[Orchestrator] Máximo de iteraciones alcanzado en tool loop")
+        log_event("ORCH", "TOOL_LOOP", "warning", "Máximo de iteraciones alcanzado en tool loop")
         return response_text
 
     def _actualizar_estado_desde_tool(
@@ -345,8 +375,9 @@ class Orchestrator:
 
         elif tool_name == "agendar_cita":
             state.pending_confirmation = False
-            logger.info(
-                f"[Orchestrator] Cita agendada: {result.get('cita_id', 'N/A')}"
+            log_event(
+                "ORCH", "STATE", "info",
+                f"Cita agendada: {result.get('cita_id', 'N/A')}"
             )
 
     async def process(
@@ -372,9 +403,20 @@ class Orchestrator:
         state = self.get_state(conversation_id, db=db)
         state.message_count += 1
 
+        log_event(
+            "ORCH", "INTENT", "debug",
+            f"Conv={conversation_id[:8]}.. msg#{state.message_count} "
+            f"agent_actual={state.active_agent}"
+        )
+
         # 1. Clasificar intención y posible cambio de agente
         intent = classify_intent(message, state)
         previous_agent = state.active_agent
+
+        log_event(
+            "ORCH", "INTENT", "info",
+            f"Intención clasificada: {intent} (agente anterior: {previous_agent})"
+        )
 
         if intent == "triage":
             state.active_agent = "triage"
@@ -404,9 +446,9 @@ class Orchestrator:
                 "symptoms_summary": state.symptoms_summary,
                 "urgency_level": state.urgency_level,
             }
-            logger.info(
-                f"[Orchestrator] Handoff detectado: triage → scheduling "
-                f"(specialty={state.specialty_name})"
+            log_event(
+                "ORCH", "HANDOFF", "info",
+                f"Handoff detectado: triage → scheduling (specialty={state.specialty_name})"
             )
 
         # 5. Extraer clasificación del triage si hay JSON en la respuesta

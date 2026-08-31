@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
+import time
 from datetime import datetime
 from typing import Any
 
 import httpx
 from dotenv import load_dotenv
 
-logger = logging.getLogger(__name__)
+from ..core.logger import log_event
+
 CITAS_TIMEOUT_SECONDS = 10.0
 
 
@@ -32,6 +33,8 @@ def _consultar_catalog_service(
         return {"ok": False, "error": "CATALOG_SERVICE_URL no configurado."}
 
     headers = {"Content-Type": "application/json"}
+    log_event("TOOLS", "HTTP", "debug", f"Catalog GET {endpoint} params={params}")
+    t0 = time.time()
     try:
         with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
             url = f"{catalog_url}{endpoint}"
@@ -40,14 +43,20 @@ def _consultar_catalog_service(
             else:
                 response = client.get(url, headers=headers)
 
+            elapsed = round((time.time() - t0) * 1000)
             if 200 <= response.status_code < 300:
+                log_event("TOOLS", "HTTP", "debug", f"Catalog {endpoint} → {response.status_code} ({elapsed}ms)")
                 return {"ok": True, "data": response.json()}
+            log_event("TOOLS", "HTTP", "warning", f"Catalog {endpoint} → {response.status_code} ({elapsed}ms)")
             return {"ok": False, "error": "No pude obtener la información."}
     except httpx.TimeoutException:
+        log_event("TOOLS", "TIMEOUT", "warning", f"Catalog {endpoint} timeout ({CITAS_TIMEOUT_SECONDS}s)")
         return {"ok": False, "error": "La consulta tardó demasiado."}
-    except httpx.RequestError:
+    except httpx.RequestError as exc:
+        log_event("TOOLS", "ERROR", "error", f"Catalog {endpoint} conexión: {exc}")
         return {"ok": False, "error": "Problema de conexión."}
-    except Exception:
+    except Exception as exc:
+        log_event("TOOLS", "ERROR", "error", f"Catalog {endpoint} error: {exc}")
         return {"ok": False, "error": "Error inesperado."}
 
 
@@ -60,6 +69,8 @@ def _consultar_citas_service(
         return {"ok": False, "error": "CITAS_SERVICE_URL no configurado."}
 
     headers = {"Content-Type": "application/json"}
+    log_event("TOOLS", "HTTP", "debug", f"Citas GET {endpoint} params={params}")
+    t0 = time.time()
     try:
         with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
             url = f"{citas_url}{endpoint}"
@@ -68,14 +79,20 @@ def _consultar_citas_service(
             else:
                 response = client.get(url, headers=headers)
 
+            elapsed = round((time.time() - t0) * 1000)
             if 200 <= response.status_code < 300:
+                log_event("TOOLS", "HTTP", "debug", f"Citas {endpoint} → {response.status_code} ({elapsed}ms)")
                 return {"ok": True, "data": response.json()}
+            log_event("TOOLS", "HTTP", "warning", f"Citas {endpoint} → {response.status_code} ({elapsed}ms)")
             return {"ok": False, "error": "No pude obtener la información."}
     except httpx.TimeoutException:
+        log_event("TOOLS", "TIMEOUT", "warning", f"Citas {endpoint} timeout ({CITAS_TIMEOUT_SECONDS}s)")
         return {"ok": False, "error": "La consulta tardó demasiado."}
-    except httpx.RequestError:
+    except httpx.RequestError as exc:
+        log_event("TOOLS", "ERROR", "error", f"Citas {endpoint} conexión: {exc}")
         return {"ok": False, "error": "Problema de conexión."}
-    except Exception:
+    except Exception as exc:
+        log_event("TOOLS", "ERROR", "error", f"Citas {endpoint} error: {exc}")
         return {"ok": False, "error": "Error inesperado."}
 
 
@@ -203,6 +220,7 @@ ASSISTANT_TOOLS: list[dict[str, Any]] = [
 
 def ejecutar_funcion(tool_name: str, arguments: dict) -> dict[str, Any]:
     """Ejecuta una tool del asistente, retornando el resultado como dict."""
+    log_event("TOOLS", "EXEC", "info", f"Ejecutando tool '{tool_name}' args={arguments}")
 
     if tool_name == "obtener_disponibilidad_citas":
         especialidad_id = arguments.get("especialidad_id")

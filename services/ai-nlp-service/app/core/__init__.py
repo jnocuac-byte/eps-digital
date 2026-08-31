@@ -11,6 +11,7 @@ from .llm_provider import (
     get_llm_factory,
     init_llm_factory,
 )
+from .logger import log_event, setup_logger
 from .orchestrator import Orchestrator
 
 __all__ = [
@@ -25,4 +26,6 @@ __all__ = [
     "AllProvidersFailedError",
     "get_llm_factory",
     "init_llm_factory",
+    "log_event",
+    "setup_logger",
 ]

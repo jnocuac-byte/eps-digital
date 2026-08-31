@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
@@ -10,8 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .core import LLMProviderFactory, Orchestrator, get_llm_factory, init_llm_factory
-
-logger = logging.getLogger(__name__)
+from .core.logger import log_event, setup_logger
 
 from app.crud import (
     cerrar_conversacion,
@@ -38,29 +37,36 @@ from fastapi.middleware.cors import CORSMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Inicializa recursos globales del servicio al arrancar."""
+    setup_logger()
+    log_event("MAIN", "INIT", "info", "Iniciando AI/NLP Service...")
+
     try:
         Base.metadata.create_all(bind=engine)
+        log_event("MAIN", "INIT", "info", "Base de datos inicializada")
     except Exception as exc:
+        log_event("MAIN", "INIT", "error", f"Error al inicializar la base de datos: {exc}")
         raise RuntimeError(f"Error al inicializar la base de datos: ") from exc
 
     # Inicializar factory de proveedores LLM
     try:
         app.state.llm_factory = init_llm_factory()
     except ValueError as exc:
-        logger.warning(f"LLMProviderFactory no disponible: {exc}")
+        log_event("MAIN", "INIT", "warning", f"LLMProviderFactory no disponible: {exc}")
         app.state.llm_factory = None
 
     # Inicializar orquestador multi-agente
     if app.state.llm_factory:
         app.state.orchestrator = Orchestrator(app.state.llm_factory)
+        log_event("MAIN", "INIT", "info", "Orquestador multi-agente inicializado")
     else:
         app.state.orchestrator = None
 
     # URL del servicio de citas
     app.state.citas_service_url = os.getenv("CITAS_SERVICE_URL")
     if app.state.citas_service_url:
-        logger.info(f"Citas Service URL configurado: {app.state.citas_service_url}")
+        log_event("MAIN", "INIT", "info", f"Citas Service URL configurado: {app.state.citas_service_url}")
 
+    log_event("MAIN", "INIT", "info", "AI/NLP Service listo")
     yield
 
 
@@ -120,6 +126,13 @@ def _mapear_historial_a_mensajes_llm(mensajes_db: list[Any]) -> list[dict[str, s
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])
 async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     """Gestiona el flujo conversacional con orquestador multi-agente."""
+    t0 = time.time()
+    log_event(
+        "MAIN", "REQUEST", "info",
+        f"POST /chat msg='{payload.mensaje[:50]}...' "
+        f"conv={payload.conversacion_id or 'nueva'}"
+    )
+
     factory = _asegurar_llm_disponible()
     orchestrator = getattr(app.state, "orchestrator", None)
     if orchestrator is None:
@@ -135,6 +148,7 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
                 "00000000-0000-0000-0000-000000000000"
             )
             conversacion = crear_conversacion(db, usuario_id=usuario_id)
+            log_event("MAIN", "CONV", "info", f"Nueva conversación: {conversacion.conversacion_id}")
         else:
             conversacion = get_conversacion(db, payload.conversacion_id)
             if conversacion is None:
@@ -143,6 +157,7 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
                     detail="Conversacion no encontrada",
                 )
             if conversacion.estado == "cerrada":
+                log_event("MAIN", "CONV", "warning", f"Conversación cerrada: {payload.conversacion_id}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
@@ -150,6 +165,7 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
                         "Inicie una nueva interacción sin conversacion_id."
                     ),
                 )
+            log_event("MAIN", "CONV", "debug", f"Conversación existente: {conversacion.conversacion_id}")
 
         # 2. Persistir mensaje del usuario
         crear_mensaje(
@@ -181,6 +197,13 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
             conversacion_id=conversacion.conversacion_id,
             remitente="asistente",
             contenido=respuesta_texto,
+        )
+
+        elapsed = round((time.time() - t0) * 1000)
+        log_event(
+            "MAIN", "RESPONSE", "info",
+            f"Respuesta enviada ({len(respuesta_texto)} chars, {elapsed}ms) "
+            f"conv={conversacion.conversacion_id}"
         )
 
         # 6. Construir clasificación desde el estado del orquestador
@@ -219,7 +242,7 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
                         ClasificacionSintomasResponse.model_validate(existente)
                     )
             except Exception as exc:
-                logger.warning(f"Error guardando clasificación: {exc}")
+                log_event("MAIN", "DB", "warning", f"Error guardando clasificación: {exc}")
 
         return ChatResponse(
             respuesta=respuesta_texto,

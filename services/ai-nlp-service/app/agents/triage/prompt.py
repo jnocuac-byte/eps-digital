@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from app.knowledge import load_triage_guide
+from ...core.logger import log_event
 
 _KNOWLEDGE_DIR = Path(__file__).resolve().parent.parent.parent / "knowledge"
 
@@ -11,6 +12,10 @@ _KNOWLEDGE_DIR = Path(__file__).resolve().parent.parent.parent / "knowledge"
 def _build_triage_prompt() -> str:
     """Construye el system prompt del triage agent con la knowledge base integrada."""
     guide = load_triage_guide()
+    log_event(
+        "TRIAGE", "KNOWLEDGE", "debug",
+        f"Knowledge base cargada: {len(guide)} especialidades"
+    )
     return TRIAGE_SYSTEM_PROMPT_TEMPLATE.format(
         guia_triaje=json.dumps(guide, ensure_ascii=False, indent=2)
     )

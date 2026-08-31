@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Any
 
 from dotenv import load_dotenv
 
-logger = logging.getLogger(__name__)
+from .logger import log_event
 
 
 class LLMProviderError(Exception):
@@ -303,7 +302,7 @@ def _build_providers() -> list[LLMProvider]:
         try:
             providers.append(MistralProvider(api_key=mistral_key))
         except LLMProviderError as exc:
-            logger.warning(f"Mistral omitido: {exc}")
+            log_event("LLM", "INIT", "warning", f"Mistral omitido: {exc}")
 
     return providers
 
@@ -321,8 +320,9 @@ class LLMProviderFactory:
                 "No hay proveedores LLM configurados. "
                 "Configura al menos GEMINI_API_KEY o GROQ_API_KEY."
             )
-        logger.info(
-            f"LLMProviderFactory inicializado con {len(self._providers)} proveedores: "
+        log_event(
+            "LLM", "INIT", "info",
+            f"Factory inicializado con {len(self._providers)} proveedores: "
             f"{[p.name for p in self._providers]}"
         )
 
@@ -356,16 +356,17 @@ class LLMProviderFactory:
                     temperature=temperature,
                     response_format=response_format,
                 )
-                logger.info(f"Respuesta exitosa via {provider.name} ({provider.model})")
+                log_event("LLM", "SUCCESS", "info", f"Respuesta exitosa via {provider.name} ({provider.model})")
                 return texto, provider.name
             except (RateLimitError, ProviderUnavailableError) as exc:
-                logger.warning(
+                log_event(
+                    "LLM", "FALLBACK", "warning",
                     f"Proveedor {provider.name} falló: {exc}. Intentando siguiente..."
                 )
                 errors.append(exc)
                 continue
             except LLMProviderError as exc:
-                logger.error(f"Error no recuperable en {provider.name}: {exc}")
+                log_event("LLM", "ERROR", "error", f"Error no recuperable en {provider.name}: {exc}")
                 errors.append(exc)
                 continue
 
