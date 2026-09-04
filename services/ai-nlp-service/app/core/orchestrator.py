@@ -289,7 +289,7 @@ class Orchestrator:
             try:
                 response_text, provider_name = self._factory.complete(
                     messages=messages,
-                    max_tokens=1500,
+                    max_tokens=2000,
                 )
                 log_event(
                     "ORCH", "TOOL_LOOP", "info",
@@ -348,20 +348,25 @@ class Orchestrator:
     def _actualizar_estado_desde_tool(
         self, state: ConversationState, tool_name: str, result: dict
     ) -> None:
-        """Actualiza el ConversationState con información obtenida de las tools."""
+        """Actualiza el ConversationState con información obtenida de las tools.
+
+        Guarda siempre el UUID y nombre del primer resultado disponible,
+        independientemente de cuántos resultados haya. Esto garantiza que
+        el LLM tenga los IDs para agendar_cita cuando el usuario confirme.
+        """
         if not result.get("ok"):
             return
 
         if tool_name == "obtener_especialidades":
             especialidades = result.get("especialidades", [])
-            if especialidades and len(especialidades) == 1:
+            if especialidades:
                 esp = especialidades[0]
                 state.specialty_id = str(esp.get("especialidad_id", ""))
                 state.specialty_name = esp.get("nombre", "")
 
         elif tool_name == "obtener_medicos":
             medicos = result.get("medicos", [])
-            if medicos and len(medicos) == 1:
+            if medicos:
                 med = medicos[0]
                 state.selected_doctor_id = str(med.get("medico_id", ""))
                 state.selected_doctor_name = (
@@ -370,7 +375,7 @@ class Orchestrator:
 
         elif tool_name == "obtener_sedes":
             sedes = result.get("sedes", [])
-            if sedes and len(sedes) == 1:
+            if sedes:
                 sede = sedes[0]
                 state.selected_sede_id = str(sede.get("sede_id", ""))
                 state.selected_sede_name = sede.get("nombre", "")

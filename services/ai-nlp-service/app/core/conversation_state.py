@@ -95,18 +95,28 @@ class ConversationState:
     handoff_context: dict | None = None
 
     def to_system_context(self) -> str:
-        """Serializa el estado como contexto inyectable en el prompt del agente."""
+        """Serializa el estado como contexto inyectable en el prompt del agente.
+
+        Incluye UUIDs explícitamente para que el LLM pueda usarlos en tool calls
+        como agendar_cita (requiere specialty_id, medico_id, sede_id).
+        """
         parts: list[str] = []
         if self.specialty_name:
             parts.append(f"Especialidad identificada: {self.specialty_name}")
+        if self.specialty_id:
+            parts.append(f"specialty_id: {self.specialty_id}")
         if self.symptoms_summary:
             parts.append(f"Síntomas reportados: {self.symptoms_summary}")
         if self.urgency_level:
             parts.append(f"Nivel de urgencia: {self.urgency_level}")
         if self.selected_doctor_name:
             parts.append(f"Médico seleccionado: {self.selected_doctor_name}")
+        if self.selected_doctor_id:
+            parts.append(f"medico_id: {self.selected_doctor_id}")
         if self.selected_sede_name:
             parts.append(f"Sede seleccionada: {self.selected_sede_name}")
+        if self.selected_sede_id:
+            parts.append(f"sede_id: {self.selected_sede_id}")
         if self.selected_date:
             parts.append(f"Fecha seleccionada: {self.selected_date}")
         if self.selected_time:
