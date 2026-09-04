@@ -25,7 +25,7 @@ cerebras-cloud-sdk>=1.0.0
 mistralai>=1.0.0
 
 # --- Strands Agents ---
-strands-agents>=1.0.0
+strands-agents[gemini]>=1.0.0
 strands-agents-tools>=0.8.0
 openai>=1.0.0
 

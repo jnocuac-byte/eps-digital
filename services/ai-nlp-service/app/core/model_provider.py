@@ -44,15 +44,18 @@ def build_fallback_model() -> Any:
     # 2. Gemini (secundario)
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     if gemini_key:
-        from strands.models.gemini import GoogleModel
+        try:
+            from strands.models.gemini import GeminiModel
 
-        candidates.append(
-            GoogleModel(
-                model_id="gemini-3.6-flash",
-                api_key=gemini_key,
+            candidates.append(
+                GeminiModel(
+                    client_args={"api_key": gemini_key},
+                    model_id="gemini-3.6-flash",
+                )
             )
-        )
-        log_event("MODEL", "INIT", "info", "Gemini provider registrado (gemini-3.6-flash)")
+            log_event("MODEL", "INIT", "info", "Gemini provider registrado (gemini-3.6-flash)")
+        except ImportError:
+            log_event("MODEL", "INIT", "warning", "Gemini omitido: strands-agents[gemini] no instalado")
 
     # 3. Cerebras (terciario) — compatible con OpenAI API
     cerebras_key = os.getenv("CEREBRAS_API_KEY", "").strip()
