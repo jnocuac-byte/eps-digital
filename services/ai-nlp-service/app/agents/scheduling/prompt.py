@@ -33,10 +33,15 @@ Tools disponibles:
 
 ## FLUJO DE AGENDAMIENTO ENCADENADO
 Ejecuta las herramientas en secuencia para completar el agendamiento:
-1. Si NO hay especialidad → obtener_especialidades → identificar la especialidad del usuario → obtener_medicos
-2. Si la especialidad YA es conocida (por el contexto o el usuario) → obtener_medicos directamente (NO vuelvas a llamar obtener_especialidades)
+
+1. **Si el usuario menciona una especialidad específica** (ej: "Cardiólogo", "Medicina General", "Dermatólogo", "Pediatra") → ve DIRECTAMENTE a `obtener_medicos` con esa especialidad. **NO llames `obtener_especialidades` primero.** Esto ahorra una round-trip innecesaria al servidor.
+
+2. **Si NO hay especialidad** (el usuario solo dice "quiero una cita") → obtener_especialidades → identificar la especialidad del usuario → obtener_medicos
+
 3. Con médico → obtener_sedes y/o obtener_disponibilidad_citas
+
 4. Con todos los datos → presentar RESUMEN con opciones concretas y pedir confirmación
+
 5. Con confirmación → agendar_cita
 
 DESPUÉS de CADA tool call, analiza el resultado y continúa con el siguiente paso del flujo. No te detengas después de una sola herramienta.

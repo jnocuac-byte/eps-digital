@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from ..core.logger import log_event
 
-CITAS_TIMEOUT_SECONDS = 10.0
+CITAS_TIMEOUT_SECONDS = 4.0
 
 
 def _obtener_catalog_service_url() -> str | None:

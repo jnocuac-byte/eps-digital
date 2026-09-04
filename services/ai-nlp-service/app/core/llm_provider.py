@@ -285,13 +285,13 @@ def _build_providers() -> list[LLMProvider]:
     load_dotenv()
     providers: list[LLMProvider] = []
 
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if gemini_key:
-        providers.append(GeminiProvider(api_key=gemini_key))
-
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
     if groq_key:
         providers.append(GroqProvider(api_key=groq_key))
+
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if gemini_key:
+        providers.append(GeminiProvider(api_key=gemini_key))
 
     cerebras_key = os.getenv("CEREBRAS_API_KEY", "").strip()
     if cerebras_key:
@@ -318,7 +318,7 @@ class LLMProviderFactory:
         if not self._providers:
             raise ValueError(
                 "No hay proveedores LLM configurados. "
-                "Configura al menos GEMINI_API_KEY o GROQ_API_KEY."
+                "Configura al menos GROQ_API_KEY o GEMINI_API_KEY."
             )
         log_event(
             "LLM", "INIT", "info",
