@@ -282,8 +282,13 @@ class Orchestrator:
         2. Si la respuesta contiene un tool_call, ejecuta la tool.
         3. Alimenta el resultado de vuelta al LLM.
         4. Repite hasta que no haya más tool calls o se alcance el máximo.
+
+        Defensa: si en la iteración 0 el LLM devuelve respuesta vacía sin tool_call,
+        inyecta un mensaje de sistema exigiendo ejecutar la consulta y reintenta una vez.
         """
         from ..agents.tools import ejecutar_funcion
+
+        empty_response_retried = False
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             try:
@@ -305,6 +310,34 @@ class Orchestrator:
 
             # Buscar tool call en la respuesta
             tool_call = _extraer_tool_call(response_text)
+
+            # DEFENSA: respuesta vacía en iteración 0 sin tool_call → reintentar una vez
+            if (
+                not tool_call
+                and len(response_text.strip()) == 0
+                and iteration == 0
+                and not empty_response_retried
+            ):
+                log_event(
+                    "ORCH", "TOOL_LOOP", "warning",
+                    "Respuesta vacía en iteración 1 sin tool_call. "
+                    "Reintentando con instrucción forzada."
+                )
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "IMPORTANTE: Tu respuesta anterior estuvo vacía. "
+                            "DEBES ejecutar una herramienta ahora. "
+                            "Si el usuario pide ver médicos u opciones, emite un tool_call "
+                            "a obtener_medicos o obtener_sedes en este turno. "
+                            "NUNCA respondas solo texto prometiendo datos sin ejecutar la tool primero."
+                        ),
+                    }
+                )
+                empty_response_retried = True
+                continue
+
             if not tool_call:
                 # No hay tool call: extraer bloque [RESPUESTA] si existe
                 return _extraer_respuesta_bloque(response_text)
