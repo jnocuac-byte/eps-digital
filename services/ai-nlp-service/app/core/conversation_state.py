@@ -2,8 +2,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Literal
+
+_UUID_REGEX = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def es_uuid_valido(valor: str) -> bool:
+    """Retorna True si el valor es un UUID v4 válido (formato PostgreSQL)."""
+    return bool(_UUID_REGEX.match(valor))
 
 logger = logging.getLogger(__name__)
 

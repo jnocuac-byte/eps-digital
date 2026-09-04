@@ -30,6 +30,10 @@ sin haber emitido la llamada a la herramienta correspondiente en ESA MISMA itera
 Si el usuario pide "muéstrame las opciones", eso significa:
 emitir obtener_medicos + obtener_sedes como tool_call en el mismo turno, NO prometer mostrarlas.
 
+ANTES de llamar obtener_medicos, verifica que el especialidad_id sea un UUID
+(formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). Si es un slug o texto,
+primero llama obtener_especialidades para resolver el UUID.
+
 ## HERRAMIENTAS DISPONIBLES
 Cuando necesites consultar datos del sistema, responde EXACTAMENTE con un bloque JSON en una línea:
 {{"tool_call": {{"name": "nombre_tool", "params": {{"parametro": "valor"}}}}}}
@@ -45,8 +49,9 @@ Tools disponibles:
 Ejecuta las herramientas en secuencia para completar el agendamiento.
 
 ### PASO 1 — Determinar especialidad:
-- Si el contexto incluye specialty_id → USA ese UUID y ve DIRECTAMENTE al PASO 2.
+- Si el contexto incluye specialty_id como UUID válido (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) → USA ese UUID y ve DIRECTAMENTE al PASO 2.
   NO llames obtener_especialidades. El specialty_id ya está en el contexto.
+- Si specialty_id NO es un UUID (ej: "medicina_general") → primero llama obtener_especialidades para obtener el UUID real, luego PASO 2.
 - Si NO hay specialty_id en el contexto → llama obtener_especialidades, identifica la especialidad, luego PASO 2.
 
 ### PASO 2 — Obtener médicos (OBLIGATORIO antes de mostrar opciones):
@@ -69,9 +74,11 @@ No respondas texto al usuario hasta que hayas completado los pasos necesarios pa
 
 ## USO DEL CONTEXTO
 El contexto incluye UUIDs y nombres de especialidad/médico/sede.
-Cuando llames a herramientas que requieran especialidad_id, USA el UUID del contexto.
-Si ya tienes specialty_id en el contexto, NO llames obtener_especialidades.
-Ve directo a obtener_medicos con el specialty_id del contexto.
+El campo specialty_id DEBE ser un UUID (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
+- Si specialty_id es un UUID válido → úsalo directamente en obtener_medicos.
+- Si specialty_id NO es un UUID (ej: "medicina_general") → primero llama
+  obtener_especialidades para obtener el UUID real de esa especialidad,
+  luego usa ese UUID en obtener_medicos.
 
 ## REGISTRO DE IDs (CRÍTICO)
 Cuando ejecutes herramientas y obtengas resultados con UUIDs:

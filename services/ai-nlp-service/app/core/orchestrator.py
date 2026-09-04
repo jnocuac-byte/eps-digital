@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .conversation_state import ConversationState, classify_intent
+from .conversation_state import ConversationState, classify_intent, es_uuid_valido
 from .llm_provider import LLMProviderFactory, AllProvidersFailedError
 from .logger import log_event
 
@@ -177,6 +177,43 @@ class Orchestrator:
             from ..agents.scheduling.prompt import SCHEDULING_SYSTEM_PROMPT
             self._scheduling_prompt = SCHEDULING_SYSTEM_PROMPT
         return self._scheduling_prompt
+
+    async def _resolver_slug_especialidad(
+        self,
+        slug_o_nombre: str,
+        specialty_name: str,
+    ) -> str | None:
+        """Resuelve un slug de knowledge base a un UUID real del catálogo.
+
+        Si slug_o_nombre ya es un UUID válido, lo retorna tal cual.
+        Si es un slug (ej: 'medicina_general'), consulta obtener_especialidades
+        y busca la especialidad cuyo nombre coincida con specialty_name.
+        """
+        from ..agents.tools import ejecutar_funcion
+
+        if es_uuid_valido(slug_o_nombre):
+            return slug_o_nombre
+
+        # Slug detectado: consultar catálogo para obtener UUID real
+        result = ejecutar_funcion("obtener_especialidades", {})
+        if not result.get("ok"):
+            return None
+
+        especialidades = result.get("especialidades", [])
+
+        # Buscar por nombre exacto (case-insensitive)
+        if specialty_name:
+            for esp in especialidades:
+                if esp.get("nombre", "").lower() == specialty_name.lower():
+                    return str(esp.get("especialidad_id", ""))
+
+        # Fallback: buscar por slug normalizado (medicina_general → medicina general)
+        slug_normalized = slug_o_nombre.replace("_", " ").lower()
+        for esp in especialidades:
+            if slug_normalized in esp.get("nombre", "").lower():
+                return str(esp.get("especialidad_id", ""))
+
+        return None
 
     def get_state(
         self, conversation_id: str, db: Session | None = None
@@ -383,9 +420,8 @@ class Orchestrator:
     ) -> None:
         """Actualiza el ConversationState con información obtenida de las tools.
 
-        Guarda siempre el UUID y nombre del primer resultado disponible,
-        independientemente de cuántos resultados haya. Esto garantiza que
-        el LLM tenga los IDs para agendar_cita cuando el usuario confirme.
+        Para obtener_especialidades: busca coincidencia por nombre o slug normalizado.
+        Para obtener_medicos/obtener_sedes: toma el primer resultado disponible.
         """
         if not result.get("ok"):
             return
@@ -393,9 +429,24 @@ class Orchestrator:
         if tool_name == "obtener_especialidades":
             especialidades = result.get("especialidades", [])
             if especialidades:
-                esp = especialidades[0]
-                state.specialty_id = str(esp.get("especialidad_id", ""))
-                state.specialty_name = esp.get("nombre", "")
+                esp_match = None
+                # Buscar por nombre exacto (case-insensitive)
+                if state.specialty_name:
+                    for esp in especialidades:
+                        if esp.get("nombre", "").lower() == state.specialty_name.lower():
+                            esp_match = esp
+                            break
+                # Fallback: buscar por slug normalizado
+                if not esp_match and state.specialty_id and not es_uuid_valido(state.specialty_id):
+                    slug_normalized = state.specialty_id.replace("_", " ").lower()
+                    for esp in especialidades:
+                        if slug_normalized in esp.get("nombre", "").lower():
+                            esp_match = esp
+                            break
+                # NO asignar el primero si no hay coincidencia — dejar None
+                if esp_match:
+                    state.specialty_id = str(esp_match.get("especialidad_id", ""))
+                    state.specialty_name = esp_match.get("nombre", "")
 
         elif tool_name == "obtener_medicos":
             medicos = result.get("medicos", [])
@@ -463,6 +514,23 @@ class Orchestrator:
         elif intent == "scheduling":
             # Enviar contexto del triaje al scheduling en handoff
             if previous_agent == "triage" and state.specialty_id:
+                # Si specialty_id es un slug, resolver UUID real antes de handoff
+                if not es_uuid_valido(state.specialty_id):
+                    uuid_real = await self._resolver_slug_especialidad(
+                        state.specialty_id, state.specialty_name or ""
+                    )
+                    if uuid_real:
+                        log_event(
+                            "ORCH", "HANDOFF", "info",
+                            f"Slug '{state.specialty_id}' resuelto a UUID: {uuid_real}"
+                        )
+                        state.specialty_id = uuid_real
+                    else:
+                        log_event(
+                            "ORCH", "HANDOFF", "warning",
+                            f"No se pudo resolver slug '{state.specialty_id}' a UUID"
+                        )
+                        state.specialty_id = None
                 state.handoff_context = {
                     "specialty_id": state.specialty_id,
                     "specialty_name": state.specialty_name,
@@ -480,6 +548,23 @@ class Orchestrator:
         # 4. Detectar handoff automático (triage → scheduling)
         if state.active_agent == "triage" and _detectar_handoff(response_text):
             state.active_agent = "scheduling"
+            # Resolver slug a UUID si es necesario
+            if state.specialty_id and not es_uuid_valido(state.specialty_id):
+                uuid_real = await self._resolver_slug_especialidad(
+                    state.specialty_id, state.specialty_name or ""
+                )
+                if uuid_real:
+                    log_event(
+                        "ORCH", "HANDOFF", "info",
+                        f"Slug '{state.specialty_id}' resuelto a UUID: {uuid_real}"
+                    )
+                    state.specialty_id = uuid_real
+                else:
+                    log_event(
+                        "ORCH", "HANDOFF", "warning",
+                        f"No se pudo resolver slug '{state.specialty_id}' a UUID"
+                    )
+                    state.specialty_id = None
             state.handoff_context = {
                 "specialty_id": state.specialty_id,
                 "specialty_name": state.specialty_name,
