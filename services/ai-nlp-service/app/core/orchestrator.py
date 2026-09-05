@@ -149,11 +149,24 @@ class Orchestrator:
             # Extraer respuesta en lenguaje natural (no JSON crudo)
             if hasattr(response, "output") and response.output is not None:
                 classification = response.output
-                respuesta = getattr(classification, "explicacion_al_paciente", None)
+                if isinstance(classification, dict):
+                    respuesta = classification.get("explicacion_al_paciente")
+                else:
+                    respuesta = getattr(classification, "explicacion_al_paciente", None)
                 if not respuesta:
+                    esp_nombre = (
+                        classification.get("especialidad_sugerida_nombre")
+                        if isinstance(classification, dict)
+                        else getattr(classification, "especialidad_sugerida_nombre", "desconocida")
+                    )
+                    urgencia = (
+                        classification.get("nivel_urgencia")
+                        if isinstance(classification, dict)
+                        else getattr(classification, "nivel_urgencia", "desconocida")
+                    )
                     respuesta = (
-                        f"Segun el analisis, se sugiere {classification.especialidad_sugerida_nombre} "
-                        f"con nivel de urgencia {classification.nivel_urgencia}. "
+                        f"Segun el analisis, se sugiere {esp_nombre} "
+                        f"con nivel de urgencia {urgencia}. "
                         "Un asistente te ayudara a agendar tu cita."
                     )
             else:

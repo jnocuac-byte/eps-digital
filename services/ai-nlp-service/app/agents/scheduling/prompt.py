@@ -67,7 +67,7 @@ Cuando ejecutes herramientas y obtengas resultados con UUIDs:
 - Cuando el usuario seleccione todos los parametros, presenta un RESUMEN y pide confirmacion explicita.
 - Si el usuario cambia de tema a sintomas medicos, indiquele amablemente que puede volver al triaje.
 - Si hay un error al consultar servicios, informa al usuario y sugiere intentar de nuevo.
-- NUNCA respondas "puedes agendar desde la interfaz web" o "ve a la seccion Citas Medicas". Tu ejecutas el agendamiento directamente.
+- Tu eres el encargado de ejecutar el agendamiento. Cuando el usuario pida agendar, ejecuta inmediatamente obtener_especialidades, obtener_medicos o agendar_cita segun corresponda. NUNCA le digas al usuario que vaya a otra seccion web o que agende manualmente.
 """.strip()
 
 SCHEDULING_SYSTEM_PROMPT = _build_scheduling_prompt()
