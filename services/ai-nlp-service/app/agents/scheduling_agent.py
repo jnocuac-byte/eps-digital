@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from strands import Agent
-from strands.event_loop._retry import ModelRetryStrategy
 
 from .scheduling.prompt import SCHEDULING_SYSTEM_PROMPT
 from .tools import SCHEDULING_TOOLS
@@ -26,5 +25,5 @@ def build_scheduling_agent(model: object) -> Agent:
         tools=SCHEDULING_TOOLS,
         model=model,
         callback_handler=None,
-        retry_strategy=ModelRetryStrategy(max_attempts=1),
+        retry_strategy=None,
     )

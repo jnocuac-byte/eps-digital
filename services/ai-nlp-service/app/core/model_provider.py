@@ -19,19 +19,19 @@ def build_fallback_model() -> Any:
     Returns:
         ModelRouter listo para pasar a Agent(model=...).
     """
-    from strands.models.routing.router import ModelRouter
+    from strands.models.routing.router import ModelRouter, RoutingCandidate
     from strands.models.routing.fallback_strategy import FallbackStrategy
 
     load_dotenv()
-    candidates: list[Any] = []
+    candidates: list[RoutingCandidate] = []
 
     # 1. Groq (primario) — compatible con OpenAI API
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
     if groq_key:
         from strands.models.openai import OpenAIModel
 
-        candidates.append(
-            OpenAIModel(
+        candidates.append(RoutingCandidate(
+            model=OpenAIModel(
                 client_args={
                     "api_key": groq_key,
                     "base_url": "https://api.groq.com/openai/v1",
@@ -41,8 +41,9 @@ def build_fallback_model() -> Any:
                     "include_reasoning": False,
                     "reasoning_effort": "low",
                 },
-            )
-        )
+            ),
+            name="groq",
+        ))
         log_event("MODEL", "INIT", "info", "Groq provider registrado (openai/gpt-oss-120b, reasoning disabled)")
 
     # 2. Gemini (secundario)
@@ -51,12 +52,13 @@ def build_fallback_model() -> Any:
         try:
             from strands.models.gemini import GeminiModel
 
-            candidates.append(
-                GeminiModel(
+            candidates.append(RoutingCandidate(
+                model=GeminiModel(
                     client_args={"api_key": gemini_key},
                     model_id="gemini-3.6-flash",
-                )
-            )
+                ),
+                name="gemini",
+            ))
             log_event("MODEL", "INIT", "info", "Gemini provider registrado (gemini-3.6-flash)")
         except ImportError:
             log_event("MODEL", "INIT", "warning", "Gemini omitido: strands-agents[gemini] no instalado")
@@ -66,15 +68,16 @@ def build_fallback_model() -> Any:
     if cerebras_key:
         from strands.models.openai import OpenAIModel
 
-        candidates.append(
-            OpenAIModel(
+        candidates.append(RoutingCandidate(
+            model=OpenAIModel(
                 client_args={
                     "api_key": cerebras_key,
                     "base_url": "https://api.cerebras.ai/v1",
                 },
                 model_id="gpt-oss-120b",
-            )
-        )
+            ),
+            name="cerebras",
+        ))
         log_event("MODEL", "INIT", "info", "Cerebras provider registrado (gpt-oss-120b)")
 
     # 4. Mistral (cuaternario) — compatible con OpenAI API
@@ -82,15 +85,16 @@ def build_fallback_model() -> Any:
     if mistral_key:
         from strands.models.openai import OpenAIModel
 
-        candidates.append(
-            OpenAIModel(
+        candidates.append(RoutingCandidate(
+            model=OpenAIModel(
                 client_args={
                     "api_key": mistral_key,
                     "base_url": "https://api.mistral.ai/v1",
                 },
                 model_id="mistral-small-latest",
-            )
-        )
+            ),
+            name="mistral",
+        ))
         log_event("MODEL", "INIT", "info", "Mistral provider registrado (mistral-small-latest)")
 
     if not candidates:

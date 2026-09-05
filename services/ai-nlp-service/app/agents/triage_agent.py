@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from strands import Agent
-from strands.event_loop._retry import ModelRetryStrategy
 
 from .triage.prompt import TRIAGE_SYSTEM_PROMPT
 from .triage.models.output import TriageAnalysis
@@ -26,5 +25,5 @@ def build_triage_agent(model: object) -> Agent:
         model=model,
         tools=[],
         callback_handler=None,
-        retry_strategy=ModelRetryStrategy(max_attempts=1),
+        retry_strategy=None,
     )
