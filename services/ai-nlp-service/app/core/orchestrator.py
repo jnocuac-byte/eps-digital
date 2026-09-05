@@ -146,8 +146,19 @@ class Orchestrator:
                         f"Handoff auto: triage → scheduling (specialty={state.specialty_name})"
                     )
 
-            # Extraer texto de la respuesta
-            respuesta = str(response)
+            # Extraer respuesta en lenguaje natural (no JSON crudo)
+            if hasattr(response, "output") and response.output is not None:
+                classification = response.output
+                respuesta = getattr(classification, "explicacion_al_paciente", None)
+                if not respuesta:
+                    respuesta = (
+                        f"Segun el analisis, se sugiere {classification.especialidad_sugerida_nombre} "
+                        f"con nivel de urgencia {classification.nivel_urgencia}. "
+                        "Un asistente te ayudara a agendar tu cita."
+                    )
+            else:
+                respuesta = str(response)
+
             if not respuesta or respuesta.strip() == "":
                 respuesta = (
                     "Entiendo tu consulta. Un asistente te podra ayudar con mas detalle. "
