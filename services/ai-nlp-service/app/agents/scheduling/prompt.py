@@ -68,6 +68,7 @@ Cuando ejecutes herramientas y obtengas resultados con UUIDs:
 - Si el usuario cambia de tema a sintomas medicos, indiquele amablemente que puede volver al triaje.
 - Si hay un error al consultar servicios, informa al usuario y sugiere intentar de nuevo.
 - Tu eres el encargado de ejecutar el agendamiento. Cuando el usuario pida agendar, ejecuta inmediatamente obtener_especialidades, obtener_medicos o agendar_cita segun corresponda. NUNCA le digas al usuario que vaya a otra seccion web o que agende manualmente.
+- Si el contexto NO incluye usuario_id, NO ejecutes agendar_cita. Informa al usuario que necesita iniciar sesion para completar el agendamiento, pero ofrece mostrarle especialidades, medicos, horarios y sedes mientras tanto.
 """.strip()
 
 SCHEDULING_SYSTEM_PROMPT = _build_scheduling_prompt()

@@ -12,11 +12,11 @@ const BASE_URLS = {
   notifications: isLocal ? 'http://localhost:8006' : 'https://eps-notification-service.onrender.com',
 };
 
-function createClient(baseURL: string, requiresAuth = false) {
+function createClient(baseURL: string, requiresAuth = false, timeoutMs = 15000) {
   const client = axios.create({
     baseURL,
     headers: { 'Content-Type': 'application/json' },
-    timeout: 15000,
+    timeout: timeoutMs,
   });
 
   if (requiresAuth) {
@@ -51,7 +51,7 @@ export const authClient = createClient(BASE_URLS.auth, true);
 export const userClient = createClient(BASE_URLS.user, true);
 export const citasClient = createClient(BASE_URLS.citas, true);
 export const catalogoClient = createClient(BASE_URLS.catalogo, true);
-export const aiClient = createClient(BASE_URLS.ai, true);
+export const aiClient = createClient(BASE_URLS.ai, true, 120000);
 export const notificacionesClient = createClient(BASE_URLS.notifications, true);
 
 // Auth API
