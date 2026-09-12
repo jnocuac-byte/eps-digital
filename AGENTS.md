@@ -138,18 +138,9 @@ de rutas al añadir endpoints bajo `/citas/`.
 
 ## Base de datos y migraciones
 
-- Los 6 servicios tienen Alembic configurado (`alembic.ini` + `alembic/env.py` + revisión
-  inicial en `alembic/versions/`). El arranque (compose y Render) ejecuta
-  `alembic upgrade head && uvicorn ...`.
-- Red de seguridad doble: cada `lifespan` FastAPI ejecuta además `Base.metadata.create_all`.
-  Para producción debe primar Alembic.
-- **CRÍTICO**: cualquier cambio de modelo (columnas, nullables, índices) exige nueva migración
-  en `alembic/versions/` antes de desplegar. Crear manualmente o con
-  `alembic revision --autogenerate` (revisar el diff generado).
-- appointments-service conserva además SQL manual idempotente:
-  `migrations/*.sql` + `scripts/run_migrations.sh` (aplica con `psql "$DATABASE_URL"`).
-- catalog-service tiene `migrations/001_add_usuario_id_to_medicos.sql` cuya columna
-  NO existe en el modelo ORM `Medico` (conocido, no romper).
+- Alembic en los 6 servicios; arranque ejecuta `alembic upgrade head && uvicorn ...`.
+- **CRÍTICO**: cambios de modelo ⇒ nueva migración en `alembic/versions/` antes de desplegar.
+- Seguridad doble: `lifespan` ejecuta `create_all` además de Alembic (producción: primar Alembic).
 
 ---
 
@@ -157,17 +148,11 @@ de rutas al añadir endpoints bajo `/citas/`.
 
 | Rol | Servicio | Detalle |
 |---|---|---|
-| Productor | auth-service | `rabbitmq_client.publicar_evento(evento, payload)` — colas durables, JSON persistente (`delivery_mode=2`). Emite `cuenta_creada` en el registro |
-| Consumidor | notifications-service | Escucha `cita_confirmada`, `cita_cancelada`, `cita_recordatorio`, `cuenta_creada` → plantilla HTML → SendGrid |
+| Productor | auth-service | `cuenta_creada` al registrarse; colas durables, JSON persistente |
+| Consumidor | notifications-service | `cita_*`, `cuenta_creada` → SendGrid emails |
 
-- Ack manual siempre (`finally`); reconexión automática cada 5 s; consumer corre como thread
-  daemon iniciado en el `lifespan`.
-- Notificaciones internas (campana web) van por HTTP: `POST {NOTIFICATIONS_SERVICE_URL}/notificaciones`
-  con `{ medico_id, tipo, titulo, descripcion }`. RabbitMQ/SendGrid son solo para emails externos.
-- Las colas `cita_*` están preparadas pero hoy NINGÚN servicio las publica (no hay emails de
-  confirmación/cancelación de citas por esa vía).
-- ⚠ `RABBITMQ_DEFAULT_URL` tiene credenciales CloudAMQP hardcodeadas como fallback en
-  `rabbitmq_client.py` y `consumer.py` — depender siempre de `RABBITMQ_URL`.
+- Notificaciones internas (campana web) van por HTTP, no por RabbitMQ.
+- ⚠ `RABBITMQ_DEFAULT_URL` tiene credenciales hardcodeadas como fallback — usar siempre `RABBITMQ_URL`.
 
 ---
 
@@ -184,38 +169,55 @@ de rutas al añadir endpoints bajo `/citas/`.
 
 ---
 
-## Chatbot AI-NLP: arquitectura y contrato
+## Chatbot AI-NLP: arquitectura Strands Agents
 
-### Estructura del servicio (post-Fase 1)
+### Estructura del servicio
 ```
 app/
-├── core/llm_provider.py    # LLMProviderFactory con fallback multi-provider
+├── core/
+│   ├── model_provider.py     # build_fallback_model() → ModelRouter con FallbackStrategy
+│   ├── orchestrator.py       # Orquestador multi-agente (triage → scheduling)
+│   ├── conversation_state.py # Estado de conversación + classify_intent()
+│   └── logger.py             # Logging centralizado
 ├── agents/
-│   ├── tools.py            # Tool dispatch + definiciones (5 tools HTTP)
+│   ├── tools.py              # 5 @tool Strands (obtener_*, agendar_cita)
+│   ├── scheduling_agent.py   # Agent de agendamiento con tools nativas
+│   ├── scheduling/prompt.py  # System prompt de agendamiento
+│   ├── triage_agent.py       # Agent de triaje con TriageAnalysis
 │   └── triage/
-│       ├── models/output.py  # RedFlagDetection, TriageAnalysis
-│       └── prompt.py         # System prompt con knowledge inyectada
+│       ├── models/output.py  # TriageAnalysis (Pydantic structured output)
+│       └── prompt.py         # System prompt de triaje
 ├── knowledge/triage_guide.json  # Base de conocimiento de triaje
-├── main.py                 # Endpoints (POST /chat + 4 GET)
-├── models.py               # SQLAlchemy: conversacion, mensaje, clasificacion_sintomas
-├── schemas.py              # Pydantic: ChatRequest/Response, ClasificacionSintomasResponse
-├── crud.py                 # CRUD de conversaciones y mensajes
-├── prompts.py              # Prompts legacy (se mantiene por compatibilidad)
-└── database.py             # Engine/session desde DATABASE_URL
+├── main.py                   # Endpoints (POST /chat + 4 GET)
+├── models.py                 # SQLAlchemy: conversacion, mensaje, clasificacion_sintomas
+├── schemas.py                # Pydantic: ChatRequest/Response
+├── crud.py                   # CRUD + persistencia de estado del orquestador
+└── database.py               # Engine/session desde DATABASE_URL
 ```
 
-### LLMProviderFactory (fallback automático)
-Orden de prioridad: **Gemini Flash → Groq Llama 3.3 70B → Cerebras Llama 3.1 8B → Mistral**
-- Si un proveedor retorna 429/5xx, pasa al siguiente automáticamente
-- Mínimo 1 proveedor requerido (GROQ_API_KEY ya existe)
-- Proveedores opcionales: GEMINI_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY
+### ModelRouter (fallback automático con Strands)
+`build_fallback_model()` en `app/core/model_provider.py` retorna un `ModelRouter`.
+Orden de prioridad: **Groq → Gemini → Cerebras → Mistral**
+- `FallbackStrategy` de Strands: si un provider retorna 429/5xx, pasa al siguiente
+- Candidates envueltos en `RoutingCandidate(model=..., name="groq")` para logs
+- Groq usa `OpenAIModel` de Strands (NO `openai.OpenAI` directo)
+- ⚠ **NUNCA** pasar `include_reasoning` o `reasoning_effort` en `params` de `OpenAIModel` — se desempaquen como kwargs a `client.chat.completions.create()` y causan TypeError
+
+### Agentes Strands
+- **triage_agent**: `Agent(model=..., tools=[], retry_strategy=None)` → retorna `TriageAnalysis` estructurado
+- **scheduling_agent**: `Agent(model=..., tools=SCHEDULING_TOOLS, retry_strategy=None)` → ejecuta tools de forma autónoma
+- `retry_strategy=None` desactiva reintentos internos; el `FallbackStrategy` maneja failover entre providers
 
 ### Contrato Frontend → Backend
 Frontend solo usa `aiApi.chat(mensaje, conversacion_id?, usuario_id?)` → `POST /chat`.
 Respuesta: `{ respuesta, conversacion_id, clasificacion }` (sin cambios).
 
-### Tools del asistente (function calling)
+### Tools del asistente (Strands @tool)
 Flujo: `obtener_especialidades()` → `obtener_medicos(especialidad_id)` → `obtener_sedes()` → confirmar → `agendar_cita(...)`
+
+**`agendar_cita` requiere 7 parámetros** (todos obligatorios):
+`usuario_id`, `especialidad_id`, `medico_id`, `tipo_servicio`, `fecha`, `hora`, `sede_id`.
+Si falta alguno, retorna error con los campos faltantes explícitos. **No inventar UUIDs.**
 
 Endpoints correctos del Catalog Service:
 - `/especialidades`
@@ -225,9 +227,10 @@ Endpoints correctos del Catalog Service:
 Y para agendar: `POST {CITAS_SERVICE_URL}/citas` con header `X-User-ID`.
 
 Notas:
-- `obtener_disponibilidad_citas` es simulada (cupos fijos); el resto consulta servicios reales.
+- `obtener_disponibilidad_citas` consulta `GET /citas/slots-disponibles` del appointments-service.
 - Errores y confirmaciones SIEMPRE en lenguaje natural, sin UUIDs ni tecnicismos.
-- Knowledge base: `app/knowledge/triage_guide.json` (8 especialidades, banderas rojas, Resolución 5596).
+- Knowledge base: `app/knowledge/triage_guide.json` (8 especialidades, banderas rojas).
+- `llm_provider.py` fue eliminado (código muerto pre-Strands).
 
 ---
 
@@ -253,14 +256,9 @@ Notas:
 ## Despliegue (Render + Docker)
 
 - Frontend producción: https://eps-digital-cn2h.onrender.com
-- SPA fallback: se requiere `frontend/public/_redirects` con `/* /index.html 200`
-  (el archivo NO existe aún — crearlo antes de servir builds de producción).
-- **Render Start Command** de cada backend debe incluir `$PORT`:
-  `alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Tras deployar, revisar logs para confirmar que uvicorn escucha en el puerto correcto.
-- Gotchas de Dockerfile conocidos (no romper más): frontend sirve el **dev server** de Vite
-  (sin build/nginx); Dockerfile de ai-nlp tiene `EXPOSE 8003` erróneo (real: 8005).
-- URLs de servicios en producción están hardcodeadas en `frontend/src/app/lib/apiClient.ts`.
+- SPA fallback: crear `frontend/public/_redirects` con `/* /index.html 200`
+- **Render Start Command**: `alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Dockerfile de ai-nlp tiene `EXPOSE 8003` erróneo (real: 8005). URLs de servicios hardcodeadas en `apiClient.ts`.
 
 ---
 
@@ -292,7 +290,7 @@ Notas:
 | `services/auth-service/app/auth.py` | JWT, bcrypt, bloqueos, 2FA, recuperación |
 | `services/appointments-service/app/crud.py` | Citas, slots, zona horaria Bogotá, métricas |
 | `services/catalog-service/app/crud.py` | Disponibilidad de médicos y borrado lógico |
-| `services/ai-nlp-service/app/core/llm_provider.py` | LLMProviderFactory con fallback multi-provider |
+| `services/ai-nlp-service/app/core/model_provider.py` | ModelRouter con fallback multi-provider |
 | `services/ai-nlp-service/app/agents/tools.py` | Tool dispatch y definiciones de function calling |
 | `services/ai-nlp-service/app/knowledge/triage_guide.json` | Base de conocimiento de triaje (8 especialidades) |
 | `services/notifications-service/app/consumer.py` | Colas RabbitMQ y despacho de plantillas |
