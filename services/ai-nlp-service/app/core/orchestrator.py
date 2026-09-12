@@ -5,6 +5,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 from strands import Agent
+from strands.hooks.events import AfterModelCallEvent
+from strands.hooks.registry import HookOrder
 
 from .conversation_state import ConversationState, classify_intent, es_uuid_valido
 from .logger import log_event
@@ -14,19 +16,24 @@ MAX_HISTORY_MESSAGES = 6
 _ROUTING_KEY_PREFIX = "strands:model_routing"
 
 
-def _extraer_provider_usado(invocation_state: dict) -> str:
-    """Extrae el nombre del proveedor LLM seleccionado por el ModelRouter.
+def _registrar_hook_provider(agent: Agent) -> None:
+    """Registra un hook que captura el proveedor LLM usado en cada invocación.
 
-    Lee el _RoutingState almacenado en invocation_state bajo la key
-    ``strands:model_routing:<agent_hex>:<router_hex>`` y retorna
-    ``state.candidate.name`` (ej: "mistral", "gemini").
+    El hook se ejecuta en AfterModelCallEvent (order=60, después del
+    _on_model_result del router en order=50). Lee el _RoutingState de
+    invocation_state y almacena candidate.name en agent._provider_used.
     """
-    for key, value in invocation_state.items():
-        if key.startswith(_ROUTING_KEY_PREFIX):
-            candidate = getattr(value, "candidate", None)
-            if candidate is not None:
-                return getattr(candidate, "name", "unknown")
-    return "unknown"
+
+    def _capturar_provider(event: AfterModelCallEvent) -> None:
+        for key, value in event.invocation_state.items():
+            if key.startswith(_ROUTING_KEY_PREFIX):
+                candidate = getattr(value, "candidate", None)
+                if candidate is not None:
+                    agent._provider_used = getattr(candidate, "name", "unknown")
+                    return
+        agent._provider_used = "unknown"
+
+    agent.hooks.add_callback(AfterModelCallEvent, _capturar_provider, order=60)
 
 
 def _extraer_explicacion(response: Any) -> str | None:
@@ -95,6 +102,8 @@ class Orchestrator:
         self._triage_agent = triage_agent
         self._scheduling_agent = scheduling_agent
         self._states: dict[str, ConversationState] = {}
+        _registrar_hook_provider(triage_agent)
+        _registrar_hook_provider(scheduling_agent)
 
     def get_state(
         self, conversation_id: str, db: Session | None = None
@@ -186,9 +195,8 @@ class Orchestrator:
 
         try:
             self._triage_agent.messages = []
-            invocation_state: dict = {}
-            response = self._triage_agent(full_message, invocation_state=invocation_state)
-            provider = _extraer_provider_usado(invocation_state)
+            response = self._triage_agent(full_message)
+            provider = getattr(self._triage_agent, "_provider_used", "unknown")
 
             # Extraer clasificación (Pydantic, dict o JSON crudo)
             classification = _extraer_clasificacion(response)
@@ -308,9 +316,8 @@ class Orchestrator:
 
         try:
             self._scheduling_agent.messages = []
-            invocation_state: dict = {}
-            response = self._scheduling_agent(full_message, invocation_state=invocation_state)
-            provider = _extraer_provider_usado(invocation_state)
+            response = self._scheduling_agent(full_message)
+            provider = getattr(self._scheduling_agent, "_provider_used", "unknown")
 
             # Extraer texto de la respuesta
             respuesta = str(response)
