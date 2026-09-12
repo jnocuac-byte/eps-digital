@@ -12,6 +12,60 @@ from .logger import log_event
 MAX_HISTORY_MESSAGES = 6
 
 
+def _extraer_explicacion(response: Any) -> str | None:
+    """Extrae explicacion_al_paciente de cualquier formato de respuesta del LLM.
+
+    Maneja 3 casos:
+      1. Objeto Pydantic con .output (structured output exitoso)
+      2. response cuyo str() contiene JSON crudo
+      3. Fallback (no se pudo extraer)
+
+    Returns:
+        Texto de explicación al paciente o None si no se pudo extraer.
+    """
+    # Caso 1: Objeto Pydantic con .output (structured output)
+    if hasattr(response, "output") and response.output is not None:
+        output = response.output
+        if isinstance(output, dict):
+            return output.get("explicacion_al_paciente")
+        return getattr(output, "explicacion_al_paciente", None)
+
+    # Caso 2: response como string que contiene JSON crudo
+    raw = str(response)
+    stripped = raw.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, dict):
+                return data.get("explicacion_al_paciente")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return None
+
+
+def _extraer_clasificacion(response: Any) -> dict | Any | None:
+    """Extrae el objeto de clasificación de cualquier formato de respuesta.
+
+    Retorna el objeto Pydantic/dict original para extraer campos adicionales
+    (resumen_clinico, especialidad, etc.).
+    """
+    if hasattr(response, "output") and response.output is not None:
+        return response.output
+
+    raw = str(response)
+    stripped = raw.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return None
+
+
 class Orchestrator:
     """Orquestador multi-agente basado en Strands Agents.
 
@@ -116,24 +170,40 @@ class Orchestrator:
         try:
             response = self._triage_agent(full_message)
 
-            # Extraer structured output
-            if hasattr(response, "output") and response.output is not None:
-                classification = response.output
+            # Extraer clasificación (Pydantic, dict o JSON crudo)
+            classification = _extraer_clasificacion(response)
+
+            if classification is not None:
+                # Extraer campos de la clasificación (soporta Pydantic y dict)
+                if isinstance(classification, dict):
+                    esp_id = classification.get("especialidad_sugerida_id")
+                    esp_nombre = classification.get("especialidad_sugerida_nombre")
+                    resumen = classification.get("resumen_clinico")
+                    urgencia = classification.get("nivel_urgencia")
+                    red_flag = classification.get("red_flag", {})
+                    red_flag_detected = red_flag.get("detected", False) if isinstance(red_flag, dict) else False
+                else:
+                    esp_id = getattr(classification, "especialidad_sugerida_id", None)
+                    esp_nombre = getattr(classification, "especialidad_sugerida_nombre", None)
+                    resumen = getattr(classification, "resumen_clinico", None)
+                    urgencia = getattr(classification, "nivel_urgencia", None)
+                    rf = getattr(classification, "red_flag", None)
+                    red_flag_detected = getattr(rf, "detected", False) if rf else False
+
                 log_event(
                     "ORCH", "TRIAGE", "info",
-                    f"Clasificacion: especialidad={classification.especialidad_sugerida_nombre}, "
-                    f"urgencia={classification.nivel_urgencia}"
+                    f"Clasificacion: especialidad={esp_nombre}, urgencia={urgencia}"
                 )
 
-                # Actualizar estado
-                state.specialty_id = classification.especialidad_sugerida_id
-                state.specialty_name = classification.especialidad_sugerida_nombre
-                state.symptoms_summary = classification.resumen_clinico
-                state.urgency_level = classification.nivel_urgencia
-                state.red_flag_detected = classification.red_flag.detected
+                # Actualizar estado (incluir symptoms_summary explícitamente)
+                state.specialty_id = esp_id
+                state.specialty_name = esp_nombre
+                state.symptoms_summary = resumen
+                state.urgency_level = urgencia
+                state.red_flag_detected = red_flag_detected
 
                 # Detectar handoff automático → scheduling
-                if classification.nivel_urgencia in ("programable", "prioritario"):
+                if urgencia in ("programable", "prioritario"):
                     state.active_agent = "scheduling"
                     state.handoff_context = {
                         "specialty_id": state.specialty_id,
@@ -146,36 +216,13 @@ class Orchestrator:
                         f"Handoff auto: triage → scheduling (specialty={state.specialty_name})"
                     )
 
-            # Extraer respuesta en lenguaje natural (no JSON crudo)
-            if hasattr(response, "output") and response.output is not None:
-                classification = response.output
-                if isinstance(classification, dict):
-                    respuesta = classification.get("explicacion_al_paciente")
-                else:
-                    respuesta = getattr(classification, "explicacion_al_paciente", None)
-                if not respuesta:
-                    esp_nombre = (
-                        classification.get("especialidad_sugerida_nombre")
-                        if isinstance(classification, dict)
-                        else getattr(classification, "especialidad_sugerida_nombre", "desconocida")
-                    )
-                    urgencia = (
-                        classification.get("nivel_urgencia")
-                        if isinstance(classification, dict)
-                        else getattr(classification, "nivel_urgencia", "desconocida")
-                    )
-                    respuesta = (
-                        f"Segun el analisis, se sugiere {esp_nombre} "
-                        f"con nivel de urgencia {urgencia}. "
-                        "Un asistente te ayudara a agendar tu cita."
-                    )
-            else:
-                respuesta = str(response)
-
-            if not respuesta or respuesta.strip() == "":
+            # Extraer respuesta en lenguaje natural (nunca JSON crudo)
+            respuesta = _extraer_explicacion(response)
+            if not respuesta:
                 respuesta = (
-                    "Entiendo tu consulta. Un asistente te podra ayudar con mas detalle. "
-                    "¿Podrias darme mas informacion sobre lo que necesitas?"
+                    f"Segun el analisis, se sugiere {state.specialty_name or 'una especialidad'} "
+                    f"con nivel de urgencia {state.urgency_level or 'a determinar'}. "
+                    "Un asistente te ayudara a agendar tu cita."
                 )
 
             return respuesta
@@ -210,6 +257,10 @@ class Orchestrator:
             context_parts.append(f"specialty_id: {state.specialty_id}")
         if state.specialty_name:
             context_parts.append(f"especialidad: {state.specialty_name}")
+        if state.symptoms_summary:
+            context_parts.append(f"sintomas_reportados: {state.symptoms_summary}")
+        if state.urgency_level:
+            context_parts.append(f"nivel_urgencia: {state.urgency_level}")
         if state.selected_doctor_id:
             context_parts.append(f"medico_id: {state.selected_doctor_id}")
         if state.selected_doctor_name:

@@ -8,29 +8,23 @@ from dotenv import load_dotenv
 from .logger import log_event
 
 
-def build_fallback_model() -> Any:
-    """Construye un ModelRouter de Strands con fallback multi-provider.
-
-    Orden de prioridad: Groq → Gemini → Cerebras → Mistral.
-    El FallbackStrategy de Strands intenta el primer provider y pasa al
-    siguiente si falla (429/5xx/timeout), reordenando automáticamente
-    por tasa de fallo.
+def _build_provider_pool() -> dict[str, RoutingCandidate]:
+    """Construye el pool completo de providers disponibles (según API keys configuradas).
 
     Returns:
-        ModelRouter listo para pasar a Agent(model=...).
+        Diccionario {nombre: RoutingCandidate} con todos los providers válidos.
     """
-    from strands.models.routing.router import ModelRouter, RoutingCandidate
-    from strands.models.routing.fallback_strategy import FallbackStrategy
+    from strands.models.routing.router import RoutingCandidate
 
     load_dotenv()
-    candidates: list[RoutingCandidate] = []
+    pool: dict[str, RoutingCandidate] = {}
 
-    # 1. Groq (primario) — compatible con OpenAI API
+    # Groq — compatible con OpenAI API
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
     if groq_key:
         from strands.models.openai import OpenAIModel
 
-        candidates.append(RoutingCandidate(
+        pool["groq"] = RoutingCandidate(
             model=OpenAIModel(
                 client_args={
                     "api_key": groq_key,
@@ -39,32 +33,30 @@ def build_fallback_model() -> Any:
                 model_id="openai/gpt-oss-120b",
             ),
             name="groq",
-        ))
-        log_event("MODEL", "INIT", "info", "Groq provider registrado (openai/gpt-oss-120b)")
+        )
 
-    # 2. Gemini (secundario)
+    # Gemini
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     if gemini_key:
         try:
             from strands.models.gemini import GeminiModel
 
-            candidates.append(RoutingCandidate(
+            pool["gemini"] = RoutingCandidate(
                 model=GeminiModel(
                     client_args={"api_key": gemini_key},
                     model_id="gemini-3.6-flash",
                 ),
                 name="gemini",
-            ))
-            log_event("MODEL", "INIT", "info", "Gemini provider registrado (gemini-3.6-flash)")
+            )
         except ImportError:
             log_event("MODEL", "INIT", "warning", "Gemini omitido: strands-agents[gemini] no instalado")
 
-    # 3. Cerebras (terciario) — compatible con OpenAI API
+    # Cerebras — compatible con OpenAI API
     cerebras_key = os.getenv("CEREBRAS_API_KEY", "").strip()
     if cerebras_key:
         from strands.models.openai import OpenAIModel
 
-        candidates.append(RoutingCandidate(
+        pool["cerebras"] = RoutingCandidate(
             model=OpenAIModel(
                 client_args={
                     "api_key": cerebras_key,
@@ -73,15 +65,14 @@ def build_fallback_model() -> Any:
                 model_id="gpt-oss-120b",
             ),
             name="cerebras",
-        ))
-        log_event("MODEL", "INIT", "info", "Cerebras provider registrado (gpt-oss-120b)")
+        )
 
-    # 4. Mistral (cuaternario) — compatible con OpenAI API
+    # Mistral — compatible con OpenAI API
     mistral_key = os.getenv("MISTRAL_API_KEY", "").strip()
     if mistral_key:
         from strands.models.openai import OpenAIModel
 
-        candidates.append(RoutingCandidate(
+        pool["mistral"] = RoutingCandidate(
             model=OpenAIModel(
                 client_args={
                     "api_key": mistral_key,
@@ -90,14 +81,45 @@ def build_fallback_model() -> Any:
                 model_id="mistral-small-latest",
             ),
             name="mistral",
-        ))
-        log_event("MODEL", "INIT", "info", "Mistral provider registrado (mistral-small-latest)")
+        )
 
-    if not candidates:
+    return pool
+
+
+def build_fallback_model(order: list[str] | None = None) -> Any:
+    """Construye un ModelRouter de Strands con fallback multi-provider.
+
+    Args:
+        order: Lista de nombres de providers en orden de prioridad.
+               Ej: ["mistral", "gemini", "cerebras", "groq"].
+               Si es None, usa el orden por defecto del pool.
+
+    Returns:
+        ModelRouter listo para pasar a Agent(model=...).
+    """
+    from strands.models.routing.router import ModelRouter
+    from strands.models.routing.fallback_strategy import FallbackStrategy
+
+    pool = _build_provider_pool()
+
+    if not pool:
         raise ValueError(
             "No hay proveedores LLM configurados. "
             "Configura al menos GROQ_API_KEY o GEMINI_API_KEY."
         )
+
+    # Construir lista de candidates según el orden pedido
+    if order:
+        candidates = [pool[name] for name in order if name in pool]
+        if not candidates:
+            log_event(
+                "MODEL", "INIT", "warning",
+                f"Ningun provider del orden pedido ({order}) esta configurado. "
+                f"Usando providers disponibles: {list(pool.keys())}"
+            )
+            candidates = list(pool.values())
+    else:
+        candidates = list(pool.values())
 
     router = ModelRouter(
         candidates,
