@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CalendarCheck, Loader2, CalendarPlus, History, MapPin, User, Clock, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { citasApi } from '../lib/apiClient';
+import { parseFechaLocal } from '../lib/fechas';
 import type { Cita } from '../types';
 
 const statusConfig = {
@@ -120,7 +121,7 @@ function CitaCard({ cita }: { cita: Cita }) {
             )}
             <span className="flex items-center gap-1">
               <Clock size={12} />
-              {new Date(cita.fecha_cita).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })} · {cita.hora_inicio}
+              {parseFechaLocal(cita.fecha_cita).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })} · {cita.hora_inicio}
             </span>
             {cita.sede_nombre && (
               <span className="flex items-center gap-1">

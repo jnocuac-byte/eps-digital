@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { History, Loader2, Filter, CalendarCheck, User, Clock } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { citasApi } from '../lib/apiClient';
+import { parseFechaLocal } from '../lib/fechas';
 import type { Cita } from '../types';
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -130,7 +131,7 @@ export default function HistorialCitasPage() {
                   <div className="flex items-center gap-1 text-sm text-gray-600">
                     <Clock size={12} className="text-gray-400" />
                     <span>
-                      {new Date(cita.fecha_cita).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {parseFechaLocal(cita.fecha_cita).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
                       {cita.hora_inicio && ` · ${cita.hora_inicio}`}
                     </span>
                   </div>

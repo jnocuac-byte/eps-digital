@@ -1,19 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ArrowLeft, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../stores/authStore';
 import { catalogoApi, citasApi } from '../lib/apiClient';
-import type { Servicio, Especialidad, Medico, Sede, Disponibilidad } from '../types';
+import type { Servicio, Especialidad, Medico, Sede, Cita } from '../types';
 
 const SEDE_DEFAULT = "4bf0500a-e23a-4f57-a8e8-ce4c20223695";
 
-const HORAS = [
-  '07:00 AM', '07:30 AM', '08:00 AM', '08:30 AM', '09:00 AM', '09:30 AM',
-  '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '02:00 PM', '02:30 PM',
-  '03:00 PM', '03:30 PM', '04:00 PM', '04:30 PM', '05:00 PM',
-];
+// Formatea una Date local a YYYY-MM-DD sin desfase de zona horaria.
+const toISODate = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 const DIAS = ['D', 'L', 'M', 'Mi', 'J', 'V', 'S'];
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -79,6 +77,9 @@ export default function AgendarCitaPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
+  const citaAReprogramarId = searchParams.get('reprogramar');
+  const esReprogramacion = !!citaAReprogramarId;
+
   const [servicioId, setServicioId] = useState(searchParams.get('servicio') || '');
   const [especialidadId, setEspecialidadId] = useState('');
   const [medicoId, setMedicoId] = useState('');
@@ -86,17 +87,17 @@ export default function AgendarCitaPage() {
   const [hora, setHora] = useState('');
   const [sintomas, setSintomas] = useState('');
   const [sedeId, setSedeId] = useState(SEDE_DEFAULT);
-  const [horasDisponibles, setHorasDisponibles] = useState<string[]>(HORAS);
+
+  // Cita original cuando se llega desde "Cancelar o Reprogramar" (?reprogramar={cita_id}).
+  const { data: citaOriginal } = useQuery<Cita>({
+    queryKey: ['cita-reprogramar', citaAReprogramarId],
+    queryFn: () => citasApi.getById(citaAReprogramarId!).then((r) => r.data),
+    enabled: esReprogramacion,
+  });
 
   const { data: sedes = [] } = useQuery<Sede[]>({
     queryKey: ['sedes'],
     queryFn: () => catalogoApi.getSedes().then((r) => r.data),
-  });
-
-  const { data: disponibilidades = [] } = useQuery<Disponibilidad[]>({
-    queryKey: ['disponibilidades', medicoId],
-    queryFn: () => catalogoApi.getDisponibilidadesMedico(medicoId).then((r) => r.data),
-    enabled: !!medicoId,
   });
 
   const { data: servicios = [] } = useQuery<Servicio[]>({
@@ -121,53 +122,38 @@ export default function AgendarCitaPage() {
 
   useEffect(() => { setEspecialidadId(''); setMedicoId(''); }, [servicioId]);
   useEffect(() => { setMedicoId(''); }, [especialidadId]);
+  useEffect(() => { setHora(''); }, [medicoId, especialidadId, fecha]);
 
-  useEffect(() => {
-    if (!medicoId || !fecha || disponibilidades.length === 0) {
-      setHorasDisponibles(HORAS);
-      return;
-    }
-
-    const diaSemana = fecha.getDay() === 0 ? 7 : fecha.getDay();
-    const disponibilidadesDia = disponibilidades.filter(d => d.dia_semana === diaSemana);
-
-    if (disponibilidadesDia.length === 0) {
-      setHorasDisponibles([]);
-      return;
-    }
-
-    const horas: string[] = [];
-    disponibilidadesDia.forEach(disp => {
-      const horaInicio = disp.hora_inicio.substring(0, 5);
-      const horaFin = disp.hora_fin.substring(0, 5);
-
-      let [h, m] = horaInicio.split(':').map(Number);
-      const [hFin] = horaFin.split(':').map(Number);
-
-      while (h < hFin) {
-        const period = h >= 12 ? 'PM' : 'AM';
-        const h12 = h === 0 ? 12 : (h > 12 ? h - 12 : h);
-        horas.push(`${h12}:${m.toString().padStart(2, '0')} ${period}`);
-
-        m += 30;
-        if (m >= 60) {
-          h += 1;
-          m = 0;
-        }
+  // Franjas horarias calculadas y validadas por el backend (America/Bogota).
+  const fechaISO = fecha ? toISODate(fecha) : '';
+  // En reprogramacion los filtros salen de la cita original; en agendado, de los selects.
+  const slotFiltros = esReprogramacion
+    ? {
+        medico_id: citaOriginal?.medico_id || undefined,
+        especialidad_id: citaOriginal?.especialidad_id || undefined,
+        servicio_id: undefined,
       }
-    });
+    : {
+        medico_id: medicoId || undefined,
+        especialidad_id: especialidadId || undefined,
+        servicio_id: servicioId || undefined,
+      };
+  const tieneFiltrosSlot = !!(slotFiltros.medico_id || slotFiltros.especialidad_id || slotFiltros.servicio_id);
 
-    const uniqueHoras = [...new Set(horas)].sort((a, b) => {
-      const [timeA, periodA] = a.split(' ');
-      const [timeB, periodB] = b.split(' ');
-      const [hA, mA] = timeA.split(':').map(Number);
-      const [hB, mB] = timeB.split(':').map(Number);
-      const adjA = periodA === 'PM' && hA !== 12 ? hA + 12 : hA;
-      const adjB = periodB === 'PM' && hB !== 12 ? hB + 12 : hB;
-      return adjA * 60 + mA - (adjB * 60 + mB);
-    });
-    setHorasDisponibles(uniqueHoras);
-  }, [medicoId, fecha, disponibilidades]);
+  const { data: slots = [], isLoading: isLoadingSlots } = useQuery<
+    { hora_inicio: string; hora_fin: string }[]
+  >({
+    queryKey: ['slots', slotFiltros.medico_id ?? '', slotFiltros.especialidad_id ?? '', slotFiltros.servicio_id ?? '', fechaISO],
+    queryFn: () =>
+      citasApi
+        .getSlotsDisponibles({ ...slotFiltros, fecha: fechaISO })
+        .then((r) => r.data),
+    enabled: !!fechaISO && tieneFiltrosSlot,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
+
+  const horasDisponibles = slots.map((s) => s.hora_inicio);
 
   const mapTipoServicio = (nombre: string): string => {
     const lower = nombre.toLowerCase();
@@ -178,18 +164,20 @@ export default function AgendarCitaPage() {
     return 'especialista'; // valor por defecto
   };
 
-  const convertToTimeFormat = (horaStr: string): string => {
-    if (!horaStr) return '';
-    const [time, period] = horaStr.split(' ');
-    let [hours, minutes] = time.split(':');
-    let h = parseInt(hours, 10);
-    if (period === 'PM' && h !== 12) h += 12;
-    if (period === 'AM' && h === 12) h = 0;
-    return `${h.toString().padStart(2, '0')}:${minutes}:00`;
-  };
+  // Los slots llegan en formato HH:MM (24h); se convierten a HH:MM:00 para el backend.
+  const convertToTimeFormat = (horaStr: string): string => (horaStr ? `${horaStr}:00` : '');
 
   const selectedEspecialidad = especialidades.find((e) => e.especialidad_id === especialidadId);
-  const duracionMinutos = selectedEspecialidad?.duracion_cita_minutos || 20;
+  // En reprogramacion se conserva la duracion original de la cita (independiente del catalogo).
+  const calcularDuracionOriginal = (cita: Cita): number => {
+    const [h1, m1] = (cita.hora_inicio || '00:00').split(':').map(Number);
+    const [h2, m2] = (cita.hora_fin || '00:20').split(':').map(Number);
+    return Math.max(h2 * 60 + m2 - (h1 * 60 + m1), 10);
+  };
+  const duracionMinutos =
+    esReprogramacion && citaOriginal
+      ? calcularDuracionOriginal(citaOriginal)
+      : selectedEspecialidad?.duracion_cita_minutos || 20;
 
   const sumarMinutos = (horaStr: string, minutos: number): string => {
     const [hours, minutes] = horaStr.split(':').map(Number);
@@ -200,37 +188,52 @@ export default function AgendarCitaPage() {
   };
 
   const mutation = useMutation({
-    mutationFn: () =>
-      citasApi.create({
+    mutationFn: () => {
+      const horaInicioPayload = convertToTimeFormat(hora);
+      if (esReprogramacion && citaAReprogramarId) {
+        return citasApi.reprogramar(citaAReprogramarId, {
+          nueva_fecha: fecha ? toISODate(fecha) : '',
+          nueva_hora_inicio: horaInicioPayload,
+          nueva_hora_fin: sumarMinutos(horaInicioPayload, duracionMinutos),
+        });
+      }
+      return citasApi.create({
         usuario_id: userId,
         medico_id: medicoId || undefined,
         especialidad_id: especialidadId || undefined,
         tipo_servicio: mapTipoServicio(selectedServicio?.nombre || ''),
-        fecha_cita: fecha?.toISOString().split('T')[0],
-        hora_inicio: convertToTimeFormat(hora),
-        hora_fin: sumarMinutos(convertToTimeFormat(hora), duracionMinutos),
+        fecha_cita: fecha ? toISODate(fecha) : '',
+        hora_inicio: horaInicioPayload,
+        hora_fin: sumarMinutos(horaInicioPayload, duracionMinutos),
         sede_id: sedeId,
         descripcion_sintomas: sintomas || undefined,
-      }),
+      });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['citas', userId] });
       qc.invalidateQueries({ queryKey: ['citas-historial', userId] });
-      toast.success('¡Cita agendada exitosamente!');
+      qc.invalidateQueries({ queryKey: ['slots'] });
+      toast.success(esReprogramacion ? '¡Cita reprogramada exitosamente!' : '¡Cita agendada exitosamente!');
       navigate('/citas/ver');
     },
-    onError: () => toast.error('Error al agendar la cita. Inténtalo de nuevo.'),
+    onError: () =>
+      toast.error(esReprogramacion ? 'Error al reprogramar la cita. Inténtalo de nuevo.' : 'Error al agendar la cita. Inténtalo de nuevo.'),
   });
 
   const selectedServicio = servicios.find((s) => s.servicio_id === servicioId);
   const selectedMedico = medicos.find((m) => m.medico_id === medicoId);
 
-  const canSubmit = servicioId && fecha && hora;
+  const canSubmit = esReprogramacion
+    ? !!citaOriginal && !!fecha && !!hora
+    : !!(servicioId && fecha && hora);
 
   return (
     <div>
       <div className="flex items-center gap-3 mb-6">
         <CalendarDays size={28} className="text-[#2B3E59]" />
-        <h2 className="font-inter text-2xl font-bold text-[#2B3E59]">Agendar Nueva Cita</h2>
+        <h2 className="font-inter text-2xl font-bold text-[#2B3E59]">
+          {esReprogramacion ? 'Reprogramar Cita' : 'Agendar Nueva Cita'}
+        </h2>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -239,6 +242,27 @@ export default function AgendarCitaPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left column */}
             <div className="space-y-4">
+              {esReprogramacion ? (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                  <p className="text-sm font-semibold text-[#2B3E59] mb-2">Cita a reprogramar</p>
+                  <p className="text-sm text-gray-800">{citaOriginal?.tipo_servicio || 'Consulta médica'}</p>
+                  {citaOriginal?.medico_nombre && (
+                    <p className="text-xs text-gray-500 mt-0.5">Dr. {citaOriginal.medico_nombre}</p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Actual:{' '}
+                    {citaOriginal
+                      ? `${new Date(`${citaOriginal.fecha_cita}T00:00:00`).toLocaleDateString('es-CO', {
+                          weekday: 'long', day: 'numeric', month: 'long',
+                        })} · ${citaOriginal.hora_inicio.slice(0, 5)}`
+                      : 'cargando...'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-3">
+                    El servicio, el médico y la sede se mantienen. Solo puedes cambiar fecha y hora.
+                  </p>
+                </div>
+              ) : (
+                <>
               {/* Tipo de Servicio */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Servicio</label>
@@ -287,6 +311,8 @@ export default function AgendarCitaPage() {
                   ))}
                 </select>
               </div>
+                </>
+              )}
             </div>
 
             {/* Right column - Calendar */}
@@ -311,47 +337,54 @@ export default function AgendarCitaPage() {
                 <select
                   value={hora}
                   onChange={(e) => setHora(e.target.value)}
-                  disabled={horasDisponibles.length === 0}
+                  disabled={isLoadingSlots || horasDisponibles.length === 0}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] disabled:bg-gray-100 disabled:text-gray-500"
                 >
-                  <option value="">Seleccionar hora...</option>
-                  {horasDisponibles.length === 0 ? (
-                    <option disabled>No hay horarios disponibles</option>
-                  ) : (
-                    horasDisponibles.map((h) => (
-                      <option key={h} value={h}>{h}</option>
-                    ))
-                  )}
+                  <option value="">
+                    {isLoadingSlots ? 'Cargando horarios...' : 'Seleccionar hora...'}
+                  </option>
+                  {horasDisponibles.map((h) => (
+                    <option key={h} value={h}>{h}</option>
+                  ))}
                 </select>
+                {!isLoadingSlots && fechaISO && tieneFiltrosSlot && horasDisponibles.length === 0 && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    No hay horarios disponibles para esta fecha. Prueba con otro día o médico.
+                  </p>
+                )}
               </div>
 
               {/* Sede */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Sede</label>
-                <select
-                  value={sedeId}
-                  onChange={(e) => setSedeId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
-                >
-                  {sedes.map((s) => (
-                    <option key={s.sede_id} value={s.sede_id}>{s.nombre} - {s.direccion}</option>
-                  ))}
-                </select>
-              </div>
+              {!esReprogramacion && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Sede</label>
+                  <select
+                    value={sedeId}
+                    onChange={(e) => setSedeId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
+                  >
+                    {sedes.map((s) => (
+                      <option key={s.sede_id} value={s.sede_id}>{s.nombre} - {s.direccion}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Síntomas */}
-          <div className="mt-5">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Descripción de Síntomas</label>
-            <textarea
-              value={sintomas}
-              onChange={(e) => setSintomas(e.target.value)}
-              rows={4}
-              placeholder="Describe brevemente tus síntomas para que el sistema pueda asignarte el especialista correcto..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] resize-none"
-            />
-          </div>
+          {!esReprogramacion && (
+            <div className="mt-5">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Descripción de Síntomas</label>
+              <textarea
+                value={sintomas}
+                onChange={(e) => setSintomas(e.target.value)}
+                rows={4}
+                placeholder="Describe brevemente tus síntomas para que el sistema pueda asignarte el especialista correcto..."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] resize-none"
+              />
+            </div>
+          )}
 
           {/* Buttons */}
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
@@ -367,7 +400,7 @@ export default function AgendarCitaPage() {
               className="flex-1 bg-[#2B3E59] text-white font-semibold py-2.5 rounded-lg text-sm hover:bg-[#1e2d40] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {mutation.isPending ? <Loader2 size={16} className="animate-spin" /> : null}
-              Confirmar Cita
+              {esReprogramacion ? 'Confirmar Reprogramación' : 'Confirmar Cita'}
             </button>
           </div>
         </div>
@@ -379,12 +412,12 @@ export default function AgendarCitaPage() {
           </h3>
           <div className="space-y-4 text-sm">
             {[
-              { label: 'Servicio', value: selectedServicio?.nombre },
-              { label: 'Especialidad', value: selectedEspecialidad?.nombre },
-              { label: 'Médico', value: selectedMedico ? `Dr. ${selectedMedico.nombres} ${selectedMedico.apellidos}` : undefined },
+              { label: 'Servicio', value: esReprogramacion ? citaOriginal?.tipo_servicio : selectedServicio?.nombre },
+              { label: 'Especialidad', value: esReprogramacion ? undefined : selectedEspecialidad?.nombre },
+              { label: 'Médico', value: !esReprogramacion && selectedMedico ? `Dr. ${selectedMedico.nombres} ${selectedMedico.apellidos}` : undefined },
               { label: 'Fecha', value: fecha?.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) },
               { label: 'Hora', value: hora },
-              { label: 'Síntomas', value: sintomas ? (sintomas.length > 40 ? sintomas.substring(0, 40) + '...' : sintomas) : undefined },
+              { label: 'Síntomas', value: esReprogramacion ? undefined : (sintomas ? (sintomas.length > 40 ? sintomas.substring(0, 40) + '...' : sintomas) : undefined) },
             ].map((item) => (
               <div key={item.label} className="border-b border-white/10 pb-3">
                 <p className="text-white/60 text-xs mb-0.5">{item.label}:</p>

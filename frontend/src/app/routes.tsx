@@ -28,10 +28,6 @@ import MedicoPerfilPage from './pages/medico/MedicoPerfilPage';
 
 export const router = createBrowserRouter([
   {
-    path: '/medico/login',
-    Component: MedicoLoginPage,
-  },
-  {
     path: '/medico',
     Component: MedicoLayout,
     children: [
@@ -94,6 +90,7 @@ export const router = createBrowserRouter([
       { index: true, Component: HomePage },
       { path: 'login', Component: LoginPage },
       { path: 'register', Component: RegisterPage },
+      { path: 'medico/login', Component: MedicoLoginPage },
       { path: 'servicios', Component: ServiciosPage },
       { path: 'ayuda', Component: AyudaPage },
       {

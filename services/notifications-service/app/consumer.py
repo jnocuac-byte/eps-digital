@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import threading
 import time
@@ -17,8 +16,7 @@ from .templates import (
 	confirmacion_cita,
 	recordatorio_cita,
 )
-
-logger = logging.getLogger(__name__)
+from .core.logger import log_event
 
 RABBITMQ_DEFAULT_URL = "amqps://jyzkesmj:xTxbKJtX0yD97CnGVgCMxTDRATEAszTY@shark.rmq.cloudamqp.com/jyzkesmj"
 COLAS_EVENTOS = (
@@ -30,7 +28,8 @@ COLAS_EVENTOS = (
 
 
 def configurar_rabbitmq() -> Tuple[pika.BlockingConnection, str]:
-	"""Conecta a RabbitMQ y retorna conexión y cola principal."""
+	"""Conecta a RabbitMQ y retorna conexion y cola principal."""
+	log_event("NOTIF", "RABBITMQ", "info", "Conectando a RabbitMQ")
 	load_dotenv()
 	rabbitmq_url = os.getenv("RABBITMQ_URL", RABBITMQ_DEFAULT_URL)
 
@@ -42,6 +41,7 @@ def configurar_rabbitmq() -> Tuple[pika.BlockingConnection, str]:
 	params.retry_delay = 3
 
 	connection = pika.BlockingConnection(params)
+	log_event("NOTIF", "RABBITMQ", "info", "RabbitMQ conectado")
 	return connection, COLAS_EVENTOS[0]
 
 
@@ -56,14 +56,15 @@ def callback(
 	properties: BasicProperties,
 	body: bytes,
 ) -> None:
-	"""Procesa mensaje de RabbitMQ y envía el correo según el evento."""
+	"""Procesa mensaje de RabbitMQ y envia el correo segun el evento."""
 	del properties
 
 	event_type = getattr(method, "routing_key", "") or ""
+	log_event("NOTIF", "RABBITMQ", "info", f"Mensaje recibido en cola={event_type}")
 	try:
 		payload: Dict[str, Any] = json.loads(body.decode("utf-8"))
 	except Exception:
-		logger.exception("Mensaje inválido en cola %s: %s", event_type, body)
+		log_event("NOTIF", "RABBITMQ", "error", f"Mensaje invalido en cola {event_type}: {body}")
 		ch.basic_ack(delivery_tag=method.delivery_tag)
 		return
 
@@ -73,7 +74,7 @@ def callback(
 	destinatario = _str_value(payload, "email") or _str_value(payload, "destinatario")
 
 	if not destinatario:
-		logger.error("Evento %s sin email destinatario: %s", event_type, payload)
+		log_event("NOTIF", "RABBITMQ", "warning", f"Evento {event_type} sin email destinatario")
 		ch.basic_ack(delivery_tag=method.delivery_tag)
 		return
 
@@ -82,7 +83,7 @@ def callback(
 
 	try:
 		if event_type == "cita_confirmada":
-			asunto = "Confirmación de cita - EPS Digital"
+			asunto = "Confirmacion de cita - EPS Digital"
 			contenido_html = confirmacion_cita(
 				nombre=_str_value(payload, "nombre", "Usuario"),
 				fecha=_str_value(payload, "fecha"),
@@ -91,7 +92,7 @@ def callback(
 				sede=_str_value(payload, "sede"),
 			)
 		elif event_type == "cita_cancelada":
-			asunto = "Cancelación de cita - EPS Digital"
+			asunto = "Cancelacion de cita - EPS Digital"
 			contenido_html = cancelacion_cita(
 				nombre=_str_value(payload, "nombre", "Usuario"),
 				fecha=_str_value(payload, "fecha"),
@@ -113,30 +114,29 @@ def callback(
 				nombre=_str_value(payload, "nombre", "Usuario")
 			)
 		else:
-			logger.warning("Evento no soportado: %s. Payload: %s", event_type, payload)
+			log_event("NOTIF", "RABBITMQ", "warning", f"Evento no soportado: {event_type}")
 			ch.basic_ack(delivery_tag=method.delivery_tag)
 			return
 
+		log_event("NOTIF", "EMAIL", "info", f"Enviando correo para evento={event_type} a={destinatario}")
 		enviado = enviar_correo(
 			destinatario=destinatario,
 			asunto=asunto,
 			contenido_html=contenido_html,
 		)
 		if not enviado:
-			logger.error(
-				"Falló el envío de correo para evento %s a %s.",
-				event_type,
-				destinatario,
-			)
-	except Exception:
-		# Nunca detenemos el consumidor por errores de procesamiento/envío.
-		logger.exception("Error procesando evento %s: %s", event_type, payload)
+			log_event("NOTIF", "EMAIL", "error", f"Fallo envio de correo para evento {event_type} a {destinatario}")
+		else:
+			log_event("NOTIF", "EMAIL", "info", f"Correo enviado para evento={event_type} a={destinatario}")
+	except Exception as exc:
+		log_event("NOTIF", "RABBITMQ", "error", f"Error procesando evento {event_type}: {exc}")
 	finally:
 		ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def iniciar_consumidor() -> None:
-	"""Inicia el consumidor en bucle infinito con reconexión automática."""
+	"""Inicia el consumidor en bucle infinito con reconexion automatica."""
+	log_event("NOTIF", "RABBITMQ", "info", "Iniciando consumidor RabbitMQ")
 	configurar_sendgrid()
 
 	while True:
@@ -153,29 +153,23 @@ def iniciar_consumidor() -> None:
 					auto_ack=False,
 				)
 
-			logger.info(
-				"Consumidor iniciado. Cola principal: %s. Escuchando: %s",
-				cola_principal,
-				", ".join(COLAS_EVENTOS),
-			)
+			log_event("NOTIF", "RABBITMQ", "info", f"Consumidor activo. Colas: {', '.join(COLAS_EVENTOS)}")
 			channel.start_consuming()
 		except (pika.exceptions.AMQPConnectionError, pika.exceptions.ChannelClosedByBroker):
-			logger.exception(
-				"Conexión RabbitMQ caída. Reintentando en 5 segundos..."
-			)
+			log_event("NOTIF", "RABBITMQ", "error", "Conexion RabbitMQ caida. Reintentando en 5 segundos...")
 			time.sleep(5)
 		except KeyboardInterrupt:
-			logger.info("Consumidor detenido manualmente.")
+			log_event("NOTIF", "RABBITMQ", "info", "Consumidor detenido manualmente")
 			break
-		except Exception:
-			logger.exception("Error inesperado en consumidor. Reintentando en 5 segundos...")
+		except Exception as exc:
+			log_event("NOTIF", "RABBITMQ", "error", f"Error inesperado en consumidor: {exc}. Reintentando en 5 segundos...")
 			time.sleep(5)
 		finally:
 			if connection and connection.is_open:
 				try:
 					connection.close()
 				except Exception:
-					logger.exception("No se pudo cerrar conexión RabbitMQ limpiamente.")
+					log_event("NOTIF", "RABBITMQ", "warning", "No se pudo cerrar conexion RabbitMQ limpiamente")
 
 
 def start_background_consumer() -> threading.Thread:
@@ -186,5 +180,5 @@ def start_background_consumer() -> threading.Thread:
 		daemon=True,
 	)
 	thread.start()
-	logger.info("Consumidor RabbitMQ ejecutándose en segundo plano.")
+	log_event("NOTIF", "RABBITMQ", "info", "Consumidor RabbitMQ ejecutandose en segundo plano")
 	return thread

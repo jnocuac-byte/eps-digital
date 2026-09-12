@@ -5,6 +5,7 @@ import { User, Activity, Shield, Edit3, ArrowLeft, Save, X, Loader2 } from 'luci
 import { toast } from 'sonner';
 import { useAuthStore } from '../stores/authStore';
 import { userApi } from '../lib/apiClient';
+import { parseFechaLocal } from '../lib/fechas';
 import type { UserCompleto } from '../types';
 
 export default function ProfilePage() {
@@ -111,7 +112,7 @@ export default function ProfilePage() {
           <div className="space-y-3 text-sm">
             {[
               { label: 'Documento', value: `${user.tipo_documento} ${user.numero_documento}` },
-              { label: 'Fecha de Nacimiento', value: user.fecha_nacimiento ? new Date(user.fecha_nacimiento).toLocaleDateString('es-CO') : '—' },
+              { label: 'Fecha de Nacimiento', value: user.fecha_nacimiento ? parseFechaLocal(user.fecha_nacimiento).toLocaleDateString('es-CO') : '—' },
               { label: 'Teléfono', value: user.telefono || '—' },
               { label: 'Email', value: user.correo || '—' },
             ].map((item) => (
@@ -153,7 +154,7 @@ export default function ProfilePage() {
           <div className="space-y-3 text-sm">
             {[
               { label: 'Número de Póliza', value: afiliacion?.numero_poliza || '—' },
-              { label: 'Fecha de Afiliación', value: afiliacion?.fecha_afiliacion ? new Date(afiliacion.fecha_afiliacion).toLocaleDateString('es-CO') : '—' },
+              { label: 'Fecha de Afiliación', value: afiliacion?.fecha_afiliacion ? parseFechaLocal(afiliacion.fecha_afiliacion).toLocaleDateString('es-CO') : '—' },
               { label: 'Estado', value: afiliacion?.estado || 'Activo' },
               { label: 'Tipo de Afiliación', value: afiliacion?.tipo_afiliacion || 'Premium' },
             ].map((item) => (

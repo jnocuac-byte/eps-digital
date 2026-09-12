@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy import and_, select
@@ -11,8 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.models import Cita, HistorialEstado, Recordatorio
 from app.schemas import CitaCreate, CitaUpdate
+from app.core.logger import log_event
 
 CATALOG_SERVICE_URL = os.getenv("CATALOG_SERVICE_URL", "http://localhost:8004")
+NOTIFICATIONS_SERVICE_URL = os.getenv("NOTIFICATIONS_SERVICE_URL", "http://localhost:8006")
 
 TIPO_SERVICIO_A_SERVICIO = {
 	"medicina_general": "Medicina General",
@@ -21,26 +24,41 @@ TIPO_SERVICIO_A_SERVICIO = {
 	"laboratorio": "Laboratorio",
 }
 
+# Zona horaria oficial de operacion (las reglas de anticipacion se calculan aqui).
+ZONA_BOGOTA = ZoneInfo("America/Bogota")
+# Anticipacion minima exigida para citas el mismo dia.
+ANTELACION_MINIMA_MINUTOS = 60
+# Duracion por defecto cuando la especialidad no informa duracion_cita_minutos.
+DURACION_FALLBACK_MINUTOS = 20
+
 
 def _obtener_medico_automatico(
+	db: Session,
 	tipo_servicio: str,
 	especialidad_id: UUID | None,
 	fecha_cita: date,
 	hora_inicio: time,
 	hora_fin: time,
 ) -> UUID | None:
-	"""Obtiene un medico disponible automaticamente (Round Robin)."""
+	"""Obtiene un medico disponible automaticamente.
+
+	Itera los medicos que cubren el horario segun catalog-service y devuelve
+	el primero sin citas ya reservadas en eps_citas (evita 400 por cruce).
+	"""
 	servicio_nombre = TIPO_SERVICIO_A_SERVICIO.get(tipo_servicio)
 	if not servicio_nombre:
+		log_event("CITAS", "AUTO_MED", "warning", f"Tipo de servicio no valido: {tipo_servicio}")
 		return None
 
 	try:
+		log_event("CITAS", "AUTO_MED", "info", f"Buscando medico automatico: serv={servicio_nombre}, fecha={fecha_cita}")
 		with httpx.Client(timeout=10.0) as client:
 			resp_servicios = client.get(
 				f"{CATALOG_SERVICE_URL}/servicios",
 				params={"solo_activos": True},
 			)
 			if resp_servicios.status_code != 200:
+				log_event("CITAS", "AUTO_MED", "warning", f"Catalog servicios status={resp_servicios.status_code}")
 				return None
 			servicios = resp_servicios.json()
 			servicio_obj = next(
@@ -48,6 +66,7 @@ def _obtener_medico_automatico(
 				None,
 			)
 			if not servicio_obj:
+				log_event("CITAS", "AUTO_MED", "warning", f"Servicio no encontrado: {servicio_nombre}")
 				return None
 
 			servicio_id = servicio_obj["servicio_id"]
@@ -66,18 +85,139 @@ def _obtener_medico_automatico(
 				params=params,
 			)
 			if resp_medicos.status_code != 200:
+				log_event("CITAS", "AUTO_MED", "warning", f"Catalog medicos status={resp_medicos.status_code}")
 				return None
 			medicos = resp_medicos.json()
-			if medicos:
-				return UUID(medicos[0]["medico_id"])
-	except Exception:
+			log_event("CITAS", "AUTO_MED", "info", f"Medicos candidatos: {len(medicos)}")
+			for item in medicos:
+				try:
+					candidato = UUID(item["medico_id"])
+				except (KeyError, TypeError, ValueError):
+					continue
+				if not es_horario_ocupado(
+					db=db,
+					medico_id=candidato,
+					fecha=fecha_cita,
+					hora_inicio=hora_inicio,
+					hora_fin=hora_fin,
+				):
+					log_event("CITAS", "AUTO_MED", "info", f"Medico auto-asignado: {candidato}")
+					return candidato
+	except Exception as exc:
+		log_event("CITAS", "AUTO_MED", "error", f"Error buscando medico automatico: {exc}")
 		return None
+	log_event("CITAS", "AUTO_MED", "warning", "No hay medicos disponibles para el horario")
 	return None
 
 
 def utc_now() -> datetime:
 	"""Retorna fecha/hora actual en UTC con timezone-aware."""
 	return datetime.now(timezone.utc)
+
+
+def hoy_bogota() -> date:
+	"""Fecha actual en la zona horaria de operacion (America/Bogota)."""
+	return datetime.now(ZONA_BOGOTA).date()
+
+
+def ahora_bogota() -> datetime:
+	"""Fecha/hora actual en la zona horaria de operacion (America/Bogota)."""
+	return datetime.now(ZONA_BOGOTA)
+
+
+def _validar_fecha_futura(fecha_cita: date, hora_inicio: time) -> None:
+	"""Rechaza fechas pasadas y horas sin la anticipacion minima para el mismo dia."""
+	hoy = hoy_bogota()
+	if fecha_cita < hoy:
+		raise ValueError("No se pueden agendar citas en fechas pasadas")
+	if fecha_cita == hoy:
+		limite = (ahora_bogota() + timedelta(minutes=ANTELACION_MINIMA_MINUTOS)).time()
+		if hora_inicio < limite:
+			raise ValueError(
+				"Las citas para el dia de hoy requieren al menos "
+				f"{ANTELACION_MINIMA_MINUTOS} minutos de anticipacion"
+			)
+
+
+def _obtener_duracion_especialidad(especialidad_id: UUID | None) -> int:
+	"""Consulta duracion_cita_minutos en catalog-service con fallback configurable."""
+	if especialidad_id is None:
+		return DURACION_FALLBACK_MINUTOS
+	try:
+		with httpx.Client(timeout=10.0) as client:
+			resp = client.get(f"{CATALOG_SERVICE_URL}/especialidades/{especialidad_id}")
+		if resp.status_code != 200:
+			return DURACION_FALLBACK_MINUTOS
+		duracion = int(resp.json().get("duracion_cita_minutos") or DURACION_FALLBACK_MINUTOS)
+	except Exception:
+		return DURACION_FALLBACK_MINUTOS
+	return max(1, min(duracion, 240))
+
+
+def _obtener_disponibilidades_medico(medico_id: UUID, dia_semana: int) -> list[dict]:
+	"""Trae los turnos activos de un medico para un dia de semana ISO (1-7)."""
+	try:
+		with httpx.Client(timeout=10.0) as client:
+			resp = client.get(
+				f"{CATALOG_SERVICE_URL}/disponibilidades/medico/{medico_id}",
+				params={"dia_semana": dia_semana},
+			)
+		if resp.status_code != 200:
+			return []
+		data = resp.json()
+	except Exception:
+		return []
+	return [t for t in data if isinstance(t, dict) and t.get("activo", False)]
+
+
+def _iterar_slots(
+	turno_inicio: time,
+	turno_fin: time,
+	duracion_minutos: int,
+	fecha: date,
+) -> list[tuple[time, time]]:
+	"""Genera franjas consecutivas de duracion_minutos dentro de un turno."""
+	base = datetime.combine(fecha, turno_inicio)
+	fin_dt = datetime.combine(fecha, turno_fin)
+	slots: list[tuple[time, time]] = []
+	cursor = base
+	while cursor + timedelta(minutes=duracion_minutos) <= fin_dt:
+		slots.append((cursor.time(), (cursor + timedelta(minutes=duracion_minutos)).time()))
+		cursor += timedelta(minutes=duracion_minutos)
+	return slots
+
+
+def _resolver_medicos_candidatos(
+	fecha: date,
+	medico_id: UUID | None = None,
+	servicio_id: UUID | None = None,
+	especialidad_id: UUID | None = None,
+) -> list[UUID]:
+	"""Resuelve medicos candidatos: el elegido o los auto-asignables para la fecha."""
+	if medico_id is not None:
+		return [medico_id]
+	try:
+		params: dict[str, str] = {"fecha": str(fecha)}
+		if servicio_id is not None:
+			params["servicio_id"] = str(servicio_id)
+		if especialidad_id is not None:
+			params["especialidad_id"] = str(especialidad_id)
+		with httpx.Client(timeout=10.0) as client:
+			resp = client.get(
+				f"{CATALOG_SERVICE_URL}/medicos/disponibles",
+				params=params,
+			)
+		if resp.status_code != 200:
+			return []
+		candidatos: list[UUID] = []
+		for item in resp.json():
+			try:
+				candidatos.append(UUID(item["medico_id"]))
+			except (KeyError, TypeError, ValueError):
+				continue
+		return candidatos
+	except Exception:
+		return []
 
 
 def es_horario_ocupado(
@@ -104,12 +244,41 @@ def es_horario_ocupado(
 	return db.scalar(stmt) is not None
 
 
+def _crear_notificacion_medico(
+	medico_id: UUID,
+	tipo: str,
+	titulo: str,
+	descripcion: str,
+) -> None:
+	"""Inserta una notificacion interna en notifications-service (HTTP POST)."""
+	log_event("CITAS", "NOTIF", "info", f"Enviar notificacion a medico={medico_id}, tipo={tipo}")
+	try:
+		with httpx.Client(timeout=5.0) as client:
+			client.post(
+				f"{NOTIFICATIONS_SERVICE_URL}/notificaciones",
+				json={
+					"medico_id": str(medico_id),
+					"tipo": tipo,
+					"titulo": titulo,
+					"descripcion": descripcion,
+				},
+			)
+		log_event("CITAS", "NOTIF", "info", f"Notificacion enviada a medico={medico_id}")
+	except Exception as exc:
+		log_event("CITAS", "NOTIF", "warning", f"Error enviando notificacion a medico={medico_id}: {exc}")
+
+
 def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
-	"""Crea una cita validando disponibilidad horaria del medico."""
+	"""Crea una cita validando fecha futura y disponibilidad horaria del medico."""
+	log_event("CITAS", "CREATE", "info", f"Creando cita: usuario={cita_data.usuario_id}, fecha={cita_data.fecha_cita}")
+	_validar_fecha_futura(cita_data.fecha_cita, cita_data.hora_inicio)
+
 	medico_id = cita_data.medico_id
 
 	if medico_id is None:
+		log_event("CITAS", "CREATE", "info", "Buscando medico automatico")
 		medico_id = _obtener_medico_automatico(
+			db=db,
 			tipo_servicio=cita_data.tipo_servicio,
 			especialidad_id=cita_data.especialidad_id,
 			fecha_cita=cita_data.fecha_cita,
@@ -117,9 +286,10 @@ def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 			hora_fin=cita_data.hora_fin,
 		)
 		if medico_id is None:
+			log_event("CITAS", "CREATE", "warning", "No hay medicos disponibles")
 			raise ValueError(
-				"No hay médicos disponibles para el servicio y horario seleccionado. "
-				"Por favor selecciona un médico específico o intenta en otro horario."
+				"No hay medicos disponibles para el servicio y horario seleccionado. "
+				"Por favor selecciona un medico especifico o intenta en otro horario."
 			)
 
 	if es_horario_ocupado(
@@ -129,6 +299,7 @@ def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 		hora_inicio=cita_data.hora_inicio,
 		hora_fin=cita_data.hora_fin,
 	):
+		log_event("CITAS", "CREATE", "warning", f"Horario ocupado para medico={medico_id}")
 		raise ValueError("El medico ya tiene una cita programada en ese horario")
 
 	cita_data.medico_id = medico_id
@@ -139,9 +310,19 @@ def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 		db.commit()
 	except IntegrityError as exc:
 		db.rollback()
+		log_event("CITAS", "CREATE", "error", f"Error de integridad creando cita: {exc}")
 		raise ValueError(f"No se pudo crear la cita: {exc}") from exc
 
 	db.refresh(nueva_cita)
+	log_event("CITAS", "CREATE", "info", f"Cita creada: cita_id={nueva_cita.cita_id}")
+
+	_crear_notificacion_medico(
+		medico_id=nueva_cita.medico_id,
+		tipo="cita_nueva",
+		titulo="Nueva cita agendada",
+		descripcion=f"Cita programada para el {nueva_cita.fecha_cita} a las {nueva_cita.hora_inicio}",
+	)
+
 	return nueva_cita
 
 
@@ -284,6 +465,7 @@ def update_cita(db: Session, cita_id: UUID, cita_data: CitaUpdate) -> Cita:
 
 def cancelar_cita(db: Session, cita_id: UUID, motivo: str | None, realizado_por: UUID) -> Cita:
 	"""Cancela una cita solo si esta programada y registra historial."""
+	log_event("CITAS", "CANCEL", "info", f"Cancelando cita={cita_id}, motivo={motivo}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise ValueError(f"No existe cita con id {cita_id}")
@@ -310,6 +492,51 @@ def cancelar_cita(db: Session, cita_id: UUID, motivo: str | None, realizado_por:
 	)
 
 	db.refresh(cita)
+	log_event("CITAS", "CANCEL", "info", f"Cita cancelada: {cita_id}")
+	return cita
+
+
+def cambiar_estado_cita(
+	db: Session,
+	cita_id: UUID,
+	nuevo_estado: str,
+	motivo: str | None,
+	realizado_por: UUID,
+) -> Cita:
+	"""Cambia el estado de una cita programada y registra el historial."""
+	log_event("CITAS", "CHANGE_STATE", "info", f"Cambiar estado cita={cita_id} a {nuevo_estado}")
+	cita = get_cita_by_id(db, cita_id)
+	if not cita:
+		raise ValueError(f"No existe cita con id {cita_id}")
+
+	if nuevo_estado == cita.estado:
+		return cita
+
+	if cita.estado != "programada":
+		raise ValueError(
+			"Solo se puede cambiar el estado de una cita en estado 'programada'"
+		)
+
+	estado_anterior = cita.estado
+	cita.estado = nuevo_estado
+
+	try:
+		db.commit()
+	except IntegrityError as exc:
+		db.rollback()
+		raise ValueError("No se pudo cambiar el estado de la cita") from exc
+
+	add_historial_estado(
+		db=db,
+		cita_id=cita.cita_id,
+		estado_anterior=estado_anterior,
+		estado_nuevo=nuevo_estado,
+		motivo=motivo,
+		realizado_por=realizado_por,
+	)
+
+	db.refresh(cita)
+	log_event("CITAS", "CHANGE_STATE", "info", f"Estado cambiado en cita={cita_id}: {estado_anterior} -> {nuevo_estado}")
 	return cita
 
 
@@ -320,11 +547,18 @@ def reprogramar_cita(
 	nueva_hora_inicio: time,
 	nueva_hora_fin: time,
 	realizado_por: UUID,
+	motivo: str | None = None,
 ) -> Cita:
-	"""Reprograma una cita validando que el nuevo horario este disponible."""
+	"""Reprograma una cita programada validando disponibilidad y registrando historial."""
+	log_event("CITAS", "RESCHEDULE", "info", f"Reprogramar cita={cita_id}, nueva_fecha={nueva_fecha}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise ValueError(f"No existe cita con id {cita_id}")
+
+	if cita.estado != "programada":
+		raise ValueError("Solo se puede reprogramar una cita en estado 'programada'")
+
+	_validar_fecha_futura(nueva_fecha, nueva_hora_inicio)
 
 	if es_horario_ocupado(
 		db=db,
@@ -336,11 +570,6 @@ def reprogramar_cita(
 	):
 		raise ValueError("El medico ya tiene una cita programada en el nuevo horario")
 
-	estado_anterior = cita.estado
-	if cita.estado != "programada":
-		# Al reprogramar, la cita vuelve a quedar programada.
-		cita.estado = "programada"
-
 	cita.fecha_cita = nueva_fecha
 	cita.hora_inicio = nueva_hora_inicio
 	cita.hora_fin = nueva_hora_fin
@@ -351,28 +580,30 @@ def reprogramar_cita(
 		db.rollback()
 		raise ValueError("No se pudo reprogramar la cita") from exc
 
-	if cita.estado != estado_anterior:
-		add_historial_estado(
-			db=db,
-			cita_id=cita.cita_id,
-			estado_anterior=estado_anterior,
-			estado_nuevo=cita.estado,
-			motivo="Reprogramacion de cita",
-			realizado_por=realizado_por,
-		)
+	add_historial_estado(
+		db=db,
+		cita_id=cita.cita_id,
+		estado_anterior="programada",
+		estado_nuevo="programada",
+		motivo=motivo or "Reprogramacion de cita",
+		realizado_por=realizado_por,
+	)
 
 	db.refresh(cita)
+	log_event("CITAS", "RESCHEDULE", "info", f"Cita reprogramada: {cita_id}")
 	return cita
 
 
 def delete_cita(db: Session, cita_id: UUID) -> bool:
 	"""Elimina una cita de forma permanente."""
+	log_event("CITAS", "DELETE", "warning", f"Eliminar cita={cita_id}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise ValueError(f"No existe cita con id {cita_id}")
 
 	db.delete(cita)
 	db.commit()
+	log_event("CITAS", "DELETE", "info", f"Cita eliminada: {cita_id}")
 	return True
 
 
@@ -565,3 +796,74 @@ def get_metricas_medico(db: Session, medico_id: UUID) -> dict:
 		"tasa_asistencia_pct": tasa_asistencia,
 		"ingresos_mes": 0,
 	}
+
+
+def generar_slots_disponibles(
+	db: Session,
+	fecha: date,
+	medico_id: UUID | None = None,
+	servicio_id: UUID | None = None,
+	especialidad_id: UUID | None = None,
+) -> list[dict[str, str]]:
+	"""Calcula las franjas horarias disponibles para agendar una cita.
+
+	Slots disponibles = turnos del medico (catalog-service)
+	                    - citas programadas que se solapen (eps_citas)
+	                    - franjas sin anticipacion minima si la fecha es hoy
+	                      (America/Bogota). Fechas pasadas retornan [].
+	"""
+	if fecha < hoy_bogota():
+		return []
+
+	if medico_id is None and servicio_id is None and especialidad_id is None:
+		raise ValueError("Se requiere medico_id, servicio_id o especialidad_id para consultar disponibilidad")
+
+	duracion = _obtener_duracion_especialidad(especialidad_id)
+	candidatos = _resolver_medicos_candidatos(fecha, medico_id, servicio_id, especialidad_id)
+	if not candidatos:
+		return []
+
+	dia_semana = fecha.isoweekday()
+
+	stmt = select(Cita).where(
+		Cita.medico_id.in_(candidatos),
+		Cita.fecha_cita == fecha,
+		Cita.estado == "programada",
+	)
+	ocupadas: dict[UUID, list[Cita]] = {}
+	for cita in db.scalars(stmt).all():
+		ocupadas.setdefault(cita.medico_id, []).append(cita)
+
+	def _solapa(inicio: time, fin: time, cita: Cita) -> bool:
+		return cita.hora_inicio < fin and cita.hora_fin > inicio
+
+	limite_hoy: time | None = None
+	if fecha == hoy_bogota():
+		limite_hoy = (ahora_bogota() + timedelta(minutes=ANTELACION_MINIMA_MINUTOS)).time()
+
+	slots_por_hora: dict[time, time] = {}
+
+	for medico in candidatos:
+		citas_medico = ocupadas.get(medico, [])
+		for turno in _obtener_disponibilidades_medico(medico, dia_semana):
+			try:
+				turno_inicio = time.fromisoformat(str(turno.get("hora_inicio"))[:8])
+				turno_fin = time.fromisoformat(str(turno.get("hora_fin"))[:8])
+			except ValueError:
+				continue
+			if turno_fin <= turno_inicio:
+				continue
+			for slot_inicio, slot_fin in _iterar_slots(turno_inicio, turno_fin, duracion, fecha):
+				if any(_solapa(slot_inicio, slot_fin, c) for c in citas_medico):
+					continue
+				if limite_hoy is not None and slot_inicio < limite_hoy:
+					continue
+				slots_por_hora.setdefault(slot_inicio, slot_fin)
+
+	return [
+		{
+			"hora_inicio": inicio.strftime("%H:%M"),
+			"hora_fin": slots_por_hora[inicio].strftime("%H:%M"),
+		}
+		for inicio in sorted(slots_por_hora)
+	]

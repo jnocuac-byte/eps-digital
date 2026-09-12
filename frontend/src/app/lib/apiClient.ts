@@ -12,11 +12,11 @@ const BASE_URLS = {
   notifications: isLocal ? 'http://localhost:8006' : 'https://eps-notification-service.onrender.com',
 };
 
-function createClient(baseURL: string, requiresAuth = false) {
+function createClient(baseURL: string, requiresAuth = false, timeoutMs = 15000) {
   const client = axios.create({
     baseURL,
     headers: { 'Content-Type': 'application/json' },
-    timeout: 15000,
+    timeout: timeoutMs,
   });
 
   if (requiresAuth) {
@@ -47,11 +47,11 @@ function createClient(baseURL: string, requiresAuth = false) {
   return client;
 }
 
-export const authClient = createClient(BASE_URLS.auth);
+export const authClient = createClient(BASE_URLS.auth, true);
 export const userClient = createClient(BASE_URLS.user, true);
 export const citasClient = createClient(BASE_URLS.citas, true);
 export const catalogoClient = createClient(BASE_URLS.catalogo, true);
-export const aiClient = createClient(BASE_URLS.ai, true);
+export const aiClient = createClient(BASE_URLS.ai, true, 120000);
 export const notificacionesClient = createClient(BASE_URLS.notifications, true);
 
 // Auth API
@@ -88,6 +88,17 @@ export const citasApi = {
     citasClient.get(`/citas/usuario/${userId}/historial`),
   cancel: (citaId: string, motivo: string) =>
     citasClient.post(`/citas/${citaId}/cancelar`, { motivo }),
+  getById: (citaId: string) =>
+    citasClient.get(`/citas/${citaId}`),
+  reprogramar: (citaId: string, data: { nueva_fecha: string; nueva_hora_inicio: string; nueva_hora_fin: string; motivo?: string }) =>
+    citasClient.post(`/citas/${citaId}/reprogramar`, data),
+  getSlotsDisponibles: (params: {
+    medico_id?: string;
+    servicio_id?: string;
+    especialidad_id?: string;
+    fecha: string;
+  }) =>
+    citasClient.get('/citas/slots-disponibles', { params }),
   getCitasMedico: (medicoId: string, filters?: { fecha?: string; fecha_inicio?: string; fecha_fin?: string }) =>
     citasClient.get(`/citas/medico/${medicoId}`, { params: filters }),
   getMetricasMedico: (medicoId: string) =>

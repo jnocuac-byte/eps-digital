@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Calendar, Clock, CheckCircle, Loader2, AlertTriangle } from 'lucide-react';
 import { authApi, citasApi } from '../../lib/apiClient';
+import { toISODateLocal } from '../../lib/fechas';
 import { useAuthStore } from '../../stores/authStore';
 import type { Cita } from '../../types';
 
@@ -34,10 +35,9 @@ function MetricCard({ label, value, icon, color = PRIMARY }: {
 export default function MedicoDashboardPage() {
   const { userId, setMedicoId, medicoId } = useAuthStore();
 
-  const hoy = new Date().toISOString().split('T')[0];
-  const en7Dias = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-    .toISOString().split('T')[0];
+  const hoy = toISODateLocal(new Date());
+  const en7Dias = toISODateLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+  const inicioMes = toISODateLocal(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
   useEffect(() => {
     if (userId && !medicoId) {

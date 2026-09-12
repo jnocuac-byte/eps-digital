@@ -4,6 +4,7 @@ import { Calendar, Bot, MapPin, ArrowRight, MessageCircle, Clock } from 'lucide-
 import { useAuthStore } from '../stores/authStore';
 import { useQuery } from '@tanstack/react-query';
 import { citasApi } from '../lib/apiClient';
+import { parseFechaLocal } from '../lib/fechas';
 
 const HERO_DOCTOR =
   'https://images.unsplash.com/photo-1758691461513-88a0aef72160?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxkb2N0b3IlMjBtZWRpY2FsJTIwcHJvZmVzc2lvbmFsJTIwc3RldGhvc2NvcGUlMjB3aGl0ZSUyMGNvYXR8ZW58MXx8fHwxNzc1MjI2NTM4fDA&ixlib=rb-4.1.0&q=80&w=1080';
@@ -131,7 +132,7 @@ export default function HomePage() {
                   <p className="font-medium text-gray-800">{proxima.tipo_servicio || proxima.especialidad_nombre}</p>
                   <p className="text-gray-500 text-sm">{proxima.medico_nombre && `Dr. ${proxima.medico_nombre}`}</p>
                   <p className="text-gray-500 text-sm">
-                    {new Date(proxima.fecha_cita).toLocaleDateString('es-CO', {
+                    {parseFechaLocal(proxima.fecha_cita).toLocaleDateString('es-CO', {
                       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
                     })} · {proxima.hora_inicio}
                   </p>

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Afiliacion, InformacionMedica, Usuario
 from app.schemas import AfiliacionCreate, MedicalInfoCreate, UserCreate, UserUpdate
+from app.core.logger import log_event
 
 
 def get_user_by_id(db: Session, usuario_id: UUID) -> Usuario | None:
@@ -41,13 +42,17 @@ def get_user_by_correo(db: Session, correo: str) -> Usuario | None:
 
 def create_user(db: Session, user_data: UserCreate) -> Usuario:
 	"""Crea un usuario nuevo validando duplicados de identificadores unicos."""
+	log_event("USER", "CREATE", "info", f"Creando usuario doc={user_data.numero_documento}")
 	if get_user_by_id(db, user_data.usuario_id):
+		log_event("USER", "CREATE", "warning", f"usuario_id ya existe: {user_data.usuario_id}")
 		raise ValueError(f"Ya existe un usuario con usuario_id {user_data.usuario_id}")
 
 	if get_user_by_documento(db, user_data.numero_documento):
+		log_event("USER", "CREATE", "warning", f"numero_documento ya existe: {user_data.numero_documento}")
 		raise ValueError(f"Ya existe un usuario con numero_documento {user_data.numero_documento}")
 
 	if get_user_by_correo(db, user_data.correo):
+		log_event("USER", "CREATE", "warning", f"correo ya existe: {user_data.correo}")
 		raise ValueError(f"Ya existe un usuario con correo {user_data.correo}")
 
 	nuevo_usuario = Usuario(**user_data.model_dump())
@@ -60,16 +65,17 @@ def create_user(db: Session, user_data: UserCreate) -> Usuario:
 		raise ValueError("No se pudo crear el usuario por conflicto de integridad") from exc
 
 	db.refresh(nuevo_usuario)
+	log_event("USER", "CREATE", "info", f"Usuario creado: {nuevo_usuario.usuario_id}")
 	return nuevo_usuario
 
 
 def update_user(db: Session, usuario_id: UUID, user_data: UserUpdate) -> Usuario:
 	"""Actualiza datos personales del usuario solo con campos enviados y no nulos."""
+	log_event("USER", "UPDATE", "info", f"Actualizar usuario={usuario_id}")
 	usuario = get_user_by_id(db, usuario_id)
 	if not usuario:
 		raise ValueError(f"No existe usuario con id {usuario_id}")
 
-	# Solo se aplican cambios con valor real para evitar sobreescribir con None.
 	update_data = user_data.model_dump(exclude_unset=True, exclude_none=True)
 	if not update_data:
 		return usuario
@@ -96,17 +102,20 @@ def update_user(db: Session, usuario_id: UUID, user_data: UserUpdate) -> Usuario
 		raise ValueError("No se pudo actualizar el usuario por conflicto de integridad") from exc
 
 	db.refresh(usuario)
+	log_event("USER", "UPDATE", "info", f"Usuario actualizado: {usuario_id}")
 	return usuario
 
 
 def delete_user(db: Session, usuario_id: UUID) -> bool:
 	"""Elimina un usuario de forma permanente (hard delete)."""
+	log_event("USER", "DELETE", "warning", f"Eliminar usuario={usuario_id}")
 	usuario = get_user_by_id(db, usuario_id)
 	if not usuario:
 		raise ValueError(f"No existe usuario con id {usuario_id}")
 
 	db.delete(usuario)
 	db.commit()
+	log_event("USER", "DELETE", "info", f"Usuario eliminado: {usuario_id}")
 	return True
 
 
@@ -120,6 +129,7 @@ def create_or_update_medical_info(
 	db: Session, usuario_id: UUID, info_data: MedicalInfoCreate
 ) -> InformacionMedica:
 	"""Crea o actualiza la informacion medica 1:1 de un usuario."""
+	log_event("USER", "UPSERT_MEDICAL", "info", f"Upsert info medica usuario={usuario_id}")
 	usuario = get_user_by_id(db, usuario_id)
 	if not usuario:
 		raise ValueError(f"No existe usuario con id {usuario_id}")
@@ -141,6 +151,7 @@ def create_or_update_medical_info(
 		raise ValueError("No se pudo guardar la informacion medica por conflicto de integridad") from exc
 
 	db.refresh(info_medica)
+	log_event("USER", "UPSERT_MEDICAL", "info", f"Info medica guardada usuario={usuario_id}")
 	return info_medica
 
 
@@ -152,6 +163,7 @@ def get_afiliacion(db: Session, usuario_id: UUID) -> Afiliacion | None:
 
 def create_afiliacion(db: Session, usuario_id: UUID, afiliacion_data: AfiliacionCreate) -> Afiliacion:
 	"""Crea la afiliacion 1:1 de un usuario."""
+	log_event("USER", "CREATE_AFIL", "info", f"Crear afiliacion usuario={usuario_id}")
 	usuario = get_user_by_id(db, usuario_id)
 	if not usuario:
 		raise ValueError(f"No existe usuario con id {usuario_id}")
@@ -170,11 +182,13 @@ def create_afiliacion(db: Session, usuario_id: UUID, afiliacion_data: Afiliacion
 		raise ValueError("No se pudo crear la afiliacion por conflicto de integridad") from exc
 
 	db.refresh(nueva_afiliacion)
+	log_event("USER", "CREATE_AFIL", "info", f"Afiliacion creada usuario={usuario_id}")
 	return nueva_afiliacion
 
 
 def update_afiliacion_estado(db: Session, usuario_id: UUID, estado: str) -> Afiliacion:
 	"""Actualiza solo el estado de la afiliacion del usuario."""
+	log_event("USER", "UPDATE_AFIL", "info", f"Actualizar estado afiliacion usuario={usuario_id}, estado={estado}")
 	afiliacion = get_afiliacion(db, usuario_id)
 	if not afiliacion:
 		raise ValueError(f"No existe afiliacion para el usuario {usuario_id}")
@@ -192,4 +206,5 @@ def update_afiliacion_estado(db: Session, usuario_id: UUID, estado: str) -> Afil
 		raise ValueError("No se pudo actualizar el estado de afiliacion") from exc
 
 	db.refresh(afiliacion)
+	log_event("USER", "UPDATE_AFIL", "info", f"Afiliacion actualizada usuario={usuario_id}")
 	return afiliacion

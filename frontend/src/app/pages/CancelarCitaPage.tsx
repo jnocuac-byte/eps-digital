@@ -5,6 +5,7 @@ import { RotateCcw, AlertTriangle, Loader2, CheckCircle2, X } from 'lucide-react
 import { toast } from 'sonner';
 import { useAuthStore } from '../stores/authStore';
 import { citasApi } from '../lib/apiClient';
+import { parseFechaLocal } from '../lib/fechas';
 import type { Cita } from '../types';
 
 export default function CancelarCitaPage() {
@@ -80,7 +81,7 @@ export default function CancelarCitaPage() {
                     <p className="text-gray-500 text-xs mt-0.5">Dr. {cita.medico_nombre}</p>
                   )}
                   <p className="text-gray-500 text-xs mt-1">
-                    {new Date(cita.fecha_cita).toLocaleDateString('es-CO', {
+                    {parseFechaLocal(cita.fecha_cita).toLocaleDateString('es-CO', {
                       weekday: 'long', day: 'numeric', month: 'long'
                     })} · {cita.hora_inicio}
                   </p>
@@ -108,7 +109,7 @@ export default function CancelarCitaPage() {
                   <p className="text-gray-600 text-sm">Dr. {selectedCita.medico_nombre}</p>
                 )}
                 <p className="text-gray-500 text-sm">
-                  {new Date(selectedCita.fecha_cita).toLocaleDateString('es-CO', {
+                  {parseFechaLocal(selectedCita.fecha_cita).toLocaleDateString('es-CO', {
                     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
                   })} · {selectedCita.hora_inicio}
                 </p>
@@ -134,7 +135,7 @@ export default function CancelarCitaPage() {
 
               <div className="flex flex-col gap-3">
                 <Link
-                  to="/citas/agendar"
+                  to={`/citas/agendar?reprogramar=${selectedCita.cita_id}`}
                   className="flex items-center justify-center gap-2 border-2 border-[#2B3E59] text-[#2B3E59] py-2.5 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
                 >
                   Reprogramar cita
@@ -165,7 +166,7 @@ export default function CancelarCitaPage() {
             </h3>
             <p className="text-gray-500 text-sm text-center mb-5">
               Esta acción no se puede deshacer. La cita del{' '}
-              <strong>{new Date(selectedCita.fecha_cita).toLocaleDateString('es-CO', { day: 'numeric', month: 'long' })}</strong>{' '}
+              <strong>{parseFechaLocal(selectedCita.fecha_cita).toLocaleDateString('es-CO', { day: 'numeric', month: 'long' })}</strong>{' '}
               será cancelada.
             </p>
             <div className="flex gap-3">

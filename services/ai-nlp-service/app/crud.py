@@ -118,3 +118,27 @@ def get_clasificacion_by_conversacion(
 		ClasificacionSintomas.conversacion_id == conversacion_id
 	)
 	return db.scalar(stmt)
+
+
+# ESTADO DEL ORQUESTADOR
+def guardar_estado_orquestador(
+	db: Session,
+	conversacion_id: UUID,
+	estado_json: str,
+) -> None:
+	"""Guarda el estado serializado del orquestador en la conversacion."""
+	conversacion = get_conversacion(db, conversacion_id)
+	if conversacion is not None:
+		conversacion.estado_orquestador = estado_json
+		db.commit()
+
+
+def cargar_estado_orquestador(
+	db: Session,
+	conversacion_id: UUID,
+) -> str | None:
+	"""Carga el estado serializado del orquestador desde la conversacion."""
+	conversacion = get_conversacion(db, conversacion_id)
+	if conversacion is None:
+		return None
+	return conversacion.estado_orquestador

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Credencial, LogAutenticacion, Registro2FA, TokenRecuperacion
 from app.schemas import UserRegister
+from app.core.logger import log_event
 
 
 # 1. Configuracion de bcrypt y JWT
@@ -121,19 +122,24 @@ def create_refresh_token(credencial_id: uuid.UUID) -> str:
 
 def verify_jwt_token(token: str, expected_tipo: str | None = None) -> dict:
 	"""Verifica firma/expiracion JWT y opcionalmente valida su tipo."""
+	log_event("AUTH", "JWT", "debug", f"Verificando JWT tipo={expected_tipo or 'any'}")
 	try:
 		payload = jwt.decode(token, _get_jwt_secret_key(), algorithms=[JWT_ALGORITHM])
 	except ExpiredSignatureError as exc:
+		log_event("AUTH", "JWT", "warning", "JWT expirado")
 		raise ValueError("Token JWT expirado") from exc
 	except JWTError as exc:
+		log_event("AUTH", "JWT", "warning", f"JWT invalido: {exc}")
 		raise ValueError("Token JWT invalido o expirado") from exc
 
 	token_tipo = payload.get("tipo")
 	if expected_tipo and token_tipo != expected_tipo:
+		log_event("AUTH", "JWT", "warning", f"Tipo JWT incorrecto: esperado={expected_tipo}, recibido={token_tipo}")
 		raise ValueError("Tipo de token JWT no valido")
 
 	sub = payload.get("sub")
 	if not sub:
+		log_event("AUTH", "JWT", "warning", "JWT sin subject")
 		raise ValueError("Token JWT sin subject")
 
 	return payload
@@ -167,7 +173,6 @@ def get_correo_by_documento(
 	numero_documento: str,
 ) -> str:
 	"""Consulta User Service por documento y retorna el correo asociado."""
-	# La firma conserva db para mantener coherencia con funciones de negocio del servicio.
 	_ = db
 
 	params = {
@@ -175,36 +180,46 @@ def get_correo_by_documento(
 		"numero_documento": numero_documento.strip(),
 	}
 	url = f"{_get_user_service_url()}/usuarios/buscar"
+	log_event("AUTH", "HTTP", "info", f"GET {url} tipo={params['tipo_documento']}, num={params['numero_documento']}")
 
 	try:
 		response = httpx.get(url, params=params, timeout=USER_SERVICE_TIMEOUT_SECONDS)
+		log_event("AUTH", "HTTP", "info", f"User Service respondio: status={response.status_code}")
 	except httpx.TimeoutException as exc:
+		log_event("AUTH", "HTTP", "error", f"User Service timeout: {url}")
 		raise UserServiceUnavailableError(
 			"User Service no responde (timeout al consultar documento)",
 		) from exc
 	except httpx.RequestError as exc:
+		log_event("AUTH", "HTTP", "error", f"User Service no responde: {exc}")
 		raise UserServiceUnavailableError(
 			"No se pudo conectar con User Service",
 		) from exc
 
 	if response.status_code == 404:
+		log_event("AUTH", "HTTP", "warning", f"Documento no encontrado en User Service")
 		raise DocumentoNoEncontradoError("Documento no encontrado")
 
 	if response.status_code >= 500:
+		log_event("AUTH", "HTTP", "error", f"User Service error: status={response.status_code}")
 		raise UserServiceUnavailableError("User Service no disponible")
 
 	if response.status_code != 200:
+		log_event("AUTH", "HTTP", "warning", f"User Service respuesta inesperada: status={response.status_code}")
 		raise ValueError("No fue posible validar el documento en User Service")
 
 	try:
 		payload = response.json()
 	except ValueError as exc:
+		log_event("AUTH", "HTTP", "error", "User Service retorno JSON invalido")
 		raise UserServiceUnavailableError("Respuesta invalida de User Service") from exc
 
 	correo = payload.get("correo")
 	if not isinstance(correo, str) or not correo.strip():
+		log_event("AUTH", "HTTP", "warning", "User Service no retorno correo valido")
 		raise UserServiceUnavailableError("User Service no retorno un correo valido")
 
+	log_event("AUTH", "HTTP", "info", f"Correo obtenido para tipo={params['tipo_documento']}, num={params['numero_documento']}")
 	return correo.lower().strip()
 
 
@@ -236,6 +251,7 @@ def log_evento(
 # 4. Funciones de recuperacion (crear token, resetear)
 def crear_token_recuperacion(db: Session, credencial_id: uuid.UUID) -> str:
 	"""Genera token de recuperacion, guarda su hash y devuelve token_hash."""
+	log_event("AUTH", "RECOVERY", "info", f"Crear token recuperacion para credencial_id={credencial_id}")
 	raw_token = secrets.token_urlsafe(32)
 	token_hash = _sha256_hex(raw_token)
 
@@ -253,6 +269,7 @@ def crear_token_recuperacion(db: Session, credencial_id: uuid.UUID) -> str:
 
 def resetear_password(db: Session, raw_token: str, new_password: str) -> bool:
 	"""Resetea contrasena usando token valido, no usado y no expirado."""
+	log_event("AUTH", "RESET_PWD", "info", "Reseteando password con token")
 	now = datetime.now(UTC)
 	token_hash = _sha256_hex(raw_token)
 
@@ -263,13 +280,16 @@ def resetear_password(db: Session, raw_token: str, new_password: str) -> bool:
 	)
 	recovery = db.execute(stmt).scalars().first()
 	if not recovery:
+		log_event("AUTH", "RESET_PWD", "warning", "Token de recuperacion no encontrado")
 		return False
 
 	if recovery.usado or recovery.expira_en <= now:
+		log_event("AUTH", "RESET_PWD", "warning", f"Token recuperacion invalido: usado={recovery.usado}, expirado={recovery.expira_en <= now}")
 		return False
 
 	credencial = get_credencial_by_id(db, recovery.credencial_id)
 	if not credencial:
+		log_event("AUTH", "RESET_PWD", "error", f"Credencial no encontrada para token: {recovery.credencial_id}")
 		return False
 
 	recovery.usado = True
@@ -277,6 +297,7 @@ def resetear_password(db: Session, raw_token: str, new_password: str) -> bool:
 	credencial.intentos_fallidos = 0
 	credencial.bloqueado_hasta = None
 
+	log_event("AUTH", "RESET_PWD", "info", f"Password reseteado para credencial_id={credencial.credencial_id}")
 	log_evento(
 		db=db,
 		credencial_id=credencial.credencial_id,
@@ -315,6 +336,7 @@ def verificar_codigo_2fa(
 	user_agent: str | None = None,
 ) -> bool:
 	"""Verifica OTP 2FA, marca usado y registra el resultado en auditoria."""
+	log_event("AUTH", "VERIFY_2FA", "info", f"Verificando 2FA para credencial_id={credencial_id}")
 	now = datetime.now(UTC)
 	stmt = (
 		select(Registro2FA)
@@ -327,21 +349,25 @@ def verificar_codigo_2fa(
 	registro = db.execute(stmt).scalars().first()
 
 	if not registro:
+		log_event("AUTH", "VERIFY_2FA", "warning", f"No hay registro 2FA activo: credencial_id={credencial_id}")
 		log_evento(db, credencial_id, "2fa_verificacion_fallida", ip, user_agent)
 		db.commit()
 		return False
 
 	if registro.expira_en <= now:
+		log_event("AUTH", "VERIFY_2FA", "warning", f"Codigo 2FA expirado: credencial_id={credencial_id}")
 		log_evento(db, credencial_id, "2fa_codigo_expirado", ip, user_agent)
 		db.commit()
 		return False
 
 	if registro.codigo_hash != _sha256_hex(codigo):
+		log_event("AUTH", "VERIFY_2FA", "warning", f"Codigo 2FA incorrecto: credencial_id={credencial_id}")
 		log_evento(db, credencial_id, "2fa_verificacion_fallida", ip, user_agent)
 		db.commit()
 		return False
 
 	registro.usado = True
+	log_event("AUTH", "VERIFY_2FA", "info", f"2FA verificado exitosamente: credencial_id={credencial_id}")
 	log_evento(db, credencial_id, "2fa_verificacion_exitosa", ip, user_agent)
 	db.commit()
 	return True
@@ -349,8 +375,10 @@ def verificar_codigo_2fa(
 
 def configurar_2fa(db: Session, credencial_id: uuid.UUID, habilitar: bool) -> bool:
 	"""Activa o desactiva 2FA en la credencial indicada."""
+	log_event("AUTH", "CONFIG_2FA", "info", f"Configurar 2FA={habilitar} para credencial_id={credencial_id}")
 	credencial = get_credencial_by_id(db, credencial_id)
 	if not credencial:
+		log_event("AUTH", "CONFIG_2FA", "warning", f"Credencial no encontrada: {credencial_id}")
 		return False
 
 	credencial.tiene_2fa = habilitar
@@ -369,11 +397,14 @@ def autenticar_usuario(
 	user_agent: str | None = None,
 ) -> tuple[uuid.UUID, bool]:
 	"""Autentica por correo/password y aplica reglas de bloqueo por intentos."""
+	log_event("AUTH", "AUTHENTICATE", "info", f"Autenticando correo={correo}")
 	credencial = get_credencial_by_correo(db, correo)
 	if not credencial:
+		log_event("AUTH", "AUTHENTICATE", "warning", f"Credencial no encontrada: {correo}")
 		raise ValueError("Credenciales invalidas")
 
 	if verificar_bloqueo(credencial):
+		log_event("AUTH", "AUTHENTICATE", "warning", f"Cuenta bloqueada: credencial_id={credencial.credencial_id}")
 		log_evento(db, credencial.credencial_id, "login_rechazado_bloqueo", ip, user_agent)
 		db.commit()
 		raise ValueError("Cuenta bloqueada temporalmente")
@@ -382,14 +413,17 @@ def autenticar_usuario(
 		credencial.intentos_fallidos += 1
 		if credencial.intentos_fallidos > MAX_INTENTOS_FALLIDOS:
 			credencial.bloqueado_hasta = datetime.now(UTC) + timedelta(minutes=BLOQUEO_MINUTES)
+			log_event("AUTH", "AUTHENTICATE", "warning", f"Cuenta bloqueada por intentos: credencial_id={credencial.credencial_id}")
 			log_evento(db, credencial.credencial_id, "login_fallido_bloqueo", ip, user_agent)
 		else:
+			log_event("AUTH", "AUTHENTICATE", "warning", f"Password incorrecto: credencial_id={credencial.credencial_id}, intentos={credencial.intentos_fallidos}")
 			log_evento(db, credencial.credencial_id, "login_fallido", ip, user_agent)
 		db.commit()
 		raise ValueError("Credenciales invalidas")
 
 	credencial.intentos_fallidos = 0
 	credencial.bloqueado_hasta = None
+	log_event("AUTH", "AUTHENTICATE", "info", f"Autenticacion exitosa: credencial_id={credencial.credencial_id}")
 	log_evento(db, credencial.credencial_id, "login_exitoso", ip, user_agent)
 	db.commit()
 
@@ -413,9 +447,11 @@ def registrar_usuario(
 	user_agent: str | None = None,
 ) -> Credencial:
 	"""Registra credencial de usuario validando unicidad de correo."""
+	log_event("AUTH", "REGISTER", "info", f"Registrando usuario correo={registro.correo}")
 	correo_normalizado = registro.correo.lower().strip()
 	existente = get_credencial_by_correo(db, correo_normalizado)
 	if existente:
+		log_event("AUTH", "REGISTER", "warning", f"Correo ya registrado: {correo_normalizado}")
 		raise ValueError("El correo ya esta registrado")
 
 	credencial = Credencial(
@@ -432,6 +468,7 @@ def registrar_usuario(
 	db.add(credencial)
 	db.flush()
 
+	log_event("AUTH", "REGISTER", "info", f"Credencial creada: {credencial.credencial_id}")
 	log_evento(
 		db=db,
 		credencial_id=credencial.credencial_id,

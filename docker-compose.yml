@@ -159,6 +159,7 @@ services:
       DATABASE_URL: postgresql://eps_user:eps_password@eps-citas-db:5432/eps_citas
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       CATALOG_SERVICE_URL: ${CATALOG_SERVICE_URL}
+      NOTIFICATIONS_SERVICE_URL: ${NOTIFICATIONS_SERVICE_URL}
     depends_on:
       citas-db:
         condition: service_healthy
