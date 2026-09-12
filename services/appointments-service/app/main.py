@@ -30,6 +30,8 @@ from app.crud import (
 	update_cita,
 )
 from app.database import Base, engine, get_db
+from app.core.logger import setup_logger, log_event
+from app.core.error_handler import register_exception_handlers
 from app.schemas import (
 	CancelarCitaRequest,
 	CambioEstadoRequest,
@@ -56,8 +58,13 @@ class MessageResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
 	"""Gestiona eventos de ciclo de vida de la aplicacion."""
+	setup_logger()
+	log_event("MAIN", "INIT", "info", "Iniciando Appointments Service...")
 	Base.metadata.create_all(bind=engine)
+	log_event("MAIN", "INIT", "info", "Base de datos inicializada")
+	log_event("MAIN", "INIT", "info", "Appointments Service listo")
 	yield
+	log_event("MAIN", "SHUTDOWN", "info", "Appointments Service finalizando")
 
 
 app = FastAPI(
@@ -66,6 +73,8 @@ app = FastAPI(
 	description="Servicio para gestion de citas medicas, historial y recordatorios.",
 	lifespan=lifespan,
 )
+
+register_exception_handlers(app)
 
 origins = [
     "https://eps-digital-cn2h.onrender.com",
@@ -106,9 +115,13 @@ def _parse_user_id_header(x_user_id: str | None) -> UUID:
 @app.post("/citas", response_model=CitaResponse, tags=["citas"])
 def crear_cita(payload: CitaCreate, db: Session = Depends(get_db)) -> CitaResponse:
 	"""Crea una cita nueva."""
+	log_event("CITAS", "CREATE", "info", f"Solicitud crear cita: usuario={payload.usuario_id}, fecha={payload.fecha_cita}")
 	try:
-		return create_cita(db, payload)
+		cita = create_cita(db, payload)
+		log_event("CITAS", "CREATE", "info", f"Cita creada: cita_id={cita.cita_id}")
+		return cita
 	except ValueError as exc:
+		log_event("CITAS", "CREATE", "warning", f"Error creando cita: {exc}")
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
@@ -120,6 +133,7 @@ def listar_citas_por_usuario(
 	db: Session = Depends(get_db),
 ) -> list[CitaResponse]:
 	"""Lista las citas de un usuario con paginacion."""
+	log_event("CITAS", "LIST", "debug", f"Listar citas usuario={usuario_id}, skip={skip}, limit={limit}")
 	return get_citas_by_usuario(db, usuario_id, skip=skip, limit=limit)
 
 
@@ -131,6 +145,7 @@ def listar_citas_historicas(
 	db: Session = Depends(get_db),
 ) -> list[CitaResponse]:
 	"""Lista las citas historicas (canceladas, atendidas, no asistio) de un usuario."""
+	log_event("CITAS", "LIST_HIST", "debug", f"Listar historial usuario={usuario_id}")
 	return get_citas_historicas_by_usuario(db, usuario_id, skip=skip, limit=limit)
 
 
@@ -143,6 +158,7 @@ def listar_citas_por_medico(
 	db: Session = Depends(get_db),
 ) -> list[CitaResponse]:
 	"""Lista citas de un medico; permite filtrar por fecha unica o rango de fechas."""
+	log_event("CITAS", "LIST_MED", "debug", f"Listar citas medico={medico_id}")
 	return get_citas_by_medico(db, medico_id, fecha=fecha, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
 
 
@@ -156,11 +172,13 @@ def listar_citas_por_estado(
 	"""Lista citas por estado."""
 	estado_normalizado = estado.strip().lower()
 	if estado_normalizado not in ESTADOS_CITA_VALIDOS:
+		log_event("CITAS", "LIST_STATE", "warning", f"Estado invalido: {estado}")
 		raise HTTPException(
 			status_code=status.HTTP_400_BAD_REQUEST,
 			detail="Estado invalido. Valores permitidos: programada, cancelada, atendida, no_asistio",
 		)
 
+	log_event("CITAS", "LIST_STATE", "debug", f"Listar citas estado={estado_normalizado}")
 	return get_citas_by_estado(db, estado_normalizado, skip=skip, limit=limit)
 
 
@@ -173,6 +191,7 @@ def listar_slots_disponibles(
 	db: Session = Depends(get_db),
 ) -> list[SlotDisponible]:
 	"""Franjas horarias disponibles para agendar (reglas en America/Bogota)."""
+	log_event("CITAS", "SLOTS", "info", f"Consultar slots fecha={fecha}, medico={medico_id}")
 	try:
 		slots = generar_slots_disponibles(
 			db,
@@ -182,7 +201,9 @@ def listar_slots_disponibles(
 			especialidad_id=especialidad_id,
 		)
 	except ValueError as exc:
+		log_event("CITAS", "SLOTS", "warning", f"Error consultando slots: {exc}")
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+	log_event("CITAS", "SLOTS", "info", f"Slots disponibles: {len(slots)}")
 	return [SlotDisponible(**slot) for slot in slots]
 
 
@@ -192,6 +213,7 @@ def obtener_metricas(
 	db: Session = Depends(get_db),
 ) -> dict:
 	"""Obtiene metricas agregadas de citas para dashboard administrativo."""
+	log_event("CITAS", "METRICS", "info", f"Metricas solicitadas: dias={dias}")
 	return get_metricas_citas(db, dias=dias)
 
 
@@ -201,14 +223,17 @@ def obtener_metricas_medico(
 	db: Session = Depends(get_db),
 ) -> dict:
 	"""Obtiene metricas del dashboard para un medico especifico."""
+	log_event("CITAS", "METRICS_MED", "info", f"Metricas medico solicitadas: medico={medico_id}")
 	return get_metricas_medico(db, medico_id=medico_id)
 
 
 @app.get("/citas/{cita_id}", response_model=CitaResponse, tags=["citas"])
 def obtener_cita(cita_id: UUID, db: Session = Depends(get_db)) -> CitaResponse:
 	"""Obtiene una cita por su identificador."""
+	log_event("CITAS", "GET", "debug", f"Obtener cita={cita_id}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
+		log_event("CITAS", "GET", "warning", f"Cita no encontrada: {cita_id}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cita no encontrada")
 	return cita
 
@@ -220,9 +245,13 @@ def actualizar_cita(
 	db: Session = Depends(get_db),
 ) -> CitaResponse:
 	"""Actualiza parcialmente una cita."""
+	log_event("CITAS", "UPDATE", "info", f"Actualizar cita={cita_id}")
 	try:
-		return update_cita(db, cita_id, payload)
+		cita = update_cita(db, cita_id, payload)
+		log_event("CITAS", "UPDATE", "info", f"Cita actualizada: {cita_id}")
+		return cita
 	except ValueError as exc:
+		log_event("CITAS", "UPDATE", "warning", f"Error actualizando cita {cita_id}: {exc}")
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST
 		raise HTTPException(status_code=status_code, detail=mensaje) from exc
@@ -237,9 +266,13 @@ def cancelar_cita_endpoint(
 ) -> CitaResponse:
 	"""Cancela una cita si cumple reglas de negocio."""
 	realizado_por = _parse_user_id_header(x_user_id)
+	log_event("CITAS", "CANCEL", "info", f"Cancelar cita={cita_id}, por={realizado_por}")
 	try:
-		return cancelar_cita(db, cita_id, payload.motivo, realizado_por)
+		cita = cancelar_cita(db, cita_id, payload.motivo, realizado_por)
+		log_event("CITAS", "CANCEL", "info", f"Cita cancelada: {cita_id}")
+		return cita
 	except ValueError as exc:
+		log_event("CITAS", "CANCEL", "warning", f"Error cancelando cita {cita_id}: {exc}")
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST
 		raise HTTPException(status_code=status_code, detail=mensaje) from exc
@@ -254,15 +287,19 @@ def cambiar_estado_cita_endpoint(
 ) -> CitaResponse:
 	"""Cambia el estado de una cita programada (atendida, no_asistio, cancelada)."""
 	realizado_por = _parse_user_id_header(x_user_id)
+	log_event("CITAS", "CHANGE_STATE", "info", f"Cambiar estado cita={cita_id} a {payload.estado}, por={realizado_por}")
 	try:
-		return cambiar_estado_cita(
+		cita = cambiar_estado_cita(
 			db,
 			cita_id,
 			nuevo_estado=payload.estado,
 			motivo=payload.motivo,
 			realizado_por=realizado_por,
 		)
+		log_event("CITAS", "CHANGE_STATE", "info", f"Estado cambiado en cita={cita_id}")
+		return cita
 	except ValueError as exc:
+		log_event("CITAS", "CHANGE_STATE", "warning", f"Error cambiando estado cita {cita_id}: {exc}")
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST
 		raise HTTPException(status_code=status_code, detail=mensaje) from exc
@@ -277,8 +314,9 @@ def reprogramar_cita_endpoint(
 ) -> CitaResponse:
 	"""Reprograma una cita validando disponibilidad."""
 	realizado_por = _parse_user_id_header(x_user_id)
+	log_event("CITAS", "RESCHEDULE", "info", f"Reprogramar cita={cita_id}, nueva_fecha={payload.nueva_fecha}, por={realizado_por}")
 	try:
-		return reprogramar_cita(
+		cita = reprogramar_cita(
 			db,
 			cita_id,
 			payload.nueva_fecha,
@@ -287,7 +325,10 @@ def reprogramar_cita_endpoint(
 			realizado_por,
 			motivo=payload.motivo,
 		)
+		log_event("CITAS", "RESCHEDULE", "info", f"Cita reprogramada: {cita_id}")
+		return cita
 	except ValueError as exc:
+		log_event("CITAS", "RESCHEDULE", "warning", f"Error reprogramando cita {cita_id}: {exc}")
 		mensaje = str(exc)
 		status_code = status.HTTP_404_NOT_FOUND if "No existe cita" in mensaje else status.HTTP_400_BAD_REQUEST
 		raise HTTPException(status_code=status_code, detail=mensaje) from exc
@@ -296,17 +337,22 @@ def reprogramar_cita_endpoint(
 @app.delete("/citas/{cita_id}", response_model=MessageResponse, tags=["citas"])
 def eliminar_cita(cita_id: UUID, db: Session = Depends(get_db)) -> MessageResponse:
 	"""Elimina una cita de forma permanente."""
+	log_event("CITAS", "DELETE", "warning", f"Eliminar cita={cita_id}")
 	try:
 		delete_cita(db, cita_id)
+		log_event("CITAS", "DELETE", "info", f"Cita eliminada: {cita_id}")
 		return MessageResponse(message="Cita eliminada correctamente", success=True)
 	except ValueError as exc:
+		log_event("CITAS", "DELETE", "warning", f"Error eliminando cita {cita_id}: {exc}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @app.get("/citas/{cita_id}/historial", response_model=list[HistorialEstadoResponse], tags=["citas"])
 def obtener_historial_cita(cita_id: UUID, db: Session = Depends(get_db)) -> list[HistorialEstadoResponse]:
 	"""Obtiene el historial de cambios de estado de una cita."""
+	log_event("CITAS", "HISTORY", "debug", f"Historial cita={cita_id}")
 	if not get_cita_by_id(db, cita_id):
+		log_event("CITAS", "HISTORY", "warning", f"Cita no encontrada para historial: {cita_id}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cita no encontrada")
 	return get_historial_by_cita(db, cita_id)
 
@@ -318,19 +364,25 @@ def obtener_historial_cita(cita_id: UUID, db: Session = Depends(get_db)) -> list
 )
 def crear_recordatorio_cita(cita_id: UUID, db: Session = Depends(get_db)) -> RecordatorioResponse:
 	"""Programa un recordatorio 24 horas antes de la cita."""
+	log_event("CITAS", "REMINDER", "info", f"Crear recordatorio para cita={cita_id}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
+		log_event("CITAS", "REMINDER", "warning", f"Cita no encontrada para recordatorio: {cita_id}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cita no encontrada")
 
 	programado_para = datetime.combine(cita.fecha_cita, cita.hora_inicio) - timedelta(hours=24)
 
 	try:
-		return create_recordatorio(db, cita_id=cita_id, programado_para=programado_para)
+		reminder = create_recordatorio(db, cita_id=cita_id, programado_para=programado_para)
+		log_event("CITAS", "REMINDER", "info", f"Recordatorio creado para cita={cita_id}")
+		return reminder
 	except ValueError as exc:
+		log_event("CITAS", "REMINDER", "warning", f"Error creando recordatorio: {exc}")
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @app.get("/recordatorios/pendientes", response_model=list[RecordatorioResponse], tags=["citas"])
 def listar_recordatorios_pendientes(db: Session = Depends(get_db)) -> list[RecordatorioResponse]:
 	"""Obtiene recordatorios pendientes de envio hasta el momento actual."""
+	log_event("CITAS", "REMINDERS", "debug", "Listar recordatorios pendientes")
 	return get_recordatorios_pendientes(db)

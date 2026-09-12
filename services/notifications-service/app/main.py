@@ -1,6 +1,5 @@
 """API principal del Notifications Service."""
 
-import logging
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -18,11 +17,10 @@ from .email_client import configurar_sendgrid, enviar_correo
 from .models import Notificacion
 from .schemas import NotificacionCreate, NotificacionResponse, MessageResponse
 from .templates import bienvenida
+from .core.logger import setup_logger, log_event
+from .core.error_handler import register_exception_handlers
 
 from fastapi.middleware.cors import CORSMiddleware
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 class TestEmailRequest(BaseModel):
@@ -55,15 +53,20 @@ def _get_stats_snapshot() -> Dict[str, Any]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+	setup_logger()
+	log_event("MAIN", "INIT", "info", "Iniciando Notifications Service...")
 	Base.metadata.create_all(bind=engine)
 	configurar_sendgrid()
 	consumer_thread = start_background_consumer()
-	logger.info("Notifications Service iniciado. Consumer activo: %s", consumer_thread.is_alive())
+	log_event("MAIN", "INIT", "info", f"Consumer activo: {consumer_thread.is_alive()}")
+	log_event("MAIN", "INIT", "info", "Notifications Service listo")
 	yield
-	logger.info("Notifications Service finalizando.")
+	log_event("MAIN", "SHUTDOWN", "info", "Notifications Service finalizando")
 
 
 app = FastAPI(title="Notifications Service", version="1.0.0", lifespan=lifespan)
+
+register_exception_handlers(app)
 
 origins = [
     "https://eps-digital-cn2h.onrender.com",
@@ -87,29 +90,33 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> Dict[str, str]:
+	log_event("NOTIF", "HEALTH", "info", "Health check solicitado")
 	rabbitmq_status = "disconnected"
 	connection = None
 	try:
 		connection, _ = configurar_rabbitmq()
 		rabbitmq_status = "connected"
+		log_event("NOTIF", "HEALTH", "info", f"RabbitMQ: {rabbitmq_status}")
 	except Exception:
-		logger.exception("No fue posible conectar a RabbitMQ desde /health.")
+		log_event("NOTIF", "HEALTH", "error", "No fue posible conectar a RabbitMQ desde /health")
 	finally:
 		if connection and connection.is_open:
 			try:
 				connection.close()
 			except Exception:
-				logger.exception("Error cerrando conexion temporal de /health.")
+				log_event("NOTIF", "HEALTH", "warning", "Error cerrando conexion temporal de /health")
 	return {"status": "ok", "rabbitmq": rabbitmq_status}
 
 
 @app.get("/stats")
 def stats() -> Dict[str, Any]:
+	log_event("NOTIF", "STATS", "debug", "Stats consultados")
 	return _get_stats_snapshot()
 
 
 @app.post("/test-email", response_model=MessageResponse)
 def test_email(payload: TestEmailRequest) -> MessageResponse:
+	log_event("NOTIF", "TEST_EMAIL", "info", f"Test email a={payload.email}")
 	contenido = bienvenida("Usuario de prueba")
 	enviado = enviar_correo(
 		destinatario=payload.email,
@@ -120,14 +127,17 @@ def test_email(payload: TestEmailRequest) -> MessageResponse:
 		_increment_stat("emails_enviados")
 		_set_stat("ultima_fecha_envio", datetime.now(timezone.utc).isoformat())
 		_set_stat("ultimo_error", None)
+		log_event("NOTIF", "TEST_EMAIL", "info", f"Test email enviado a={payload.email}")
 		return MessageResponse(message="Correo de prueba enviado correctamente")
 	_increment_stat("emails_fallidos")
 	_set_stat("ultimo_error", "No se pudo enviar el correo de prueba")
+	log_event("NOTIF", "TEST_EMAIL", "error", f"Error enviando test email a={payload.email}")
 	raise HTTPException(status_code=500, detail="Error enviando correo de prueba")
 
 
 @app.post("/notificaciones", response_model=NotificacionResponse, tags=["notificaciones"])
 def crear_notificacion(payload: NotificacionCreate, db: Session = Depends(get_db)) -> NotificacionResponse:
+	log_event("NOTIF", "CREATE", "info", f"Notificacion para medico={payload.medico_id}, tipo={payload.tipo}")
 	notif = Notificacion(
 		medico_id=payload.medico_id,
 		tipo=payload.tipo,
@@ -138,6 +148,7 @@ def crear_notificacion(payload: NotificacionCreate, db: Session = Depends(get_db
 	db.add(notif)
 	db.commit()
 	db.refresh(notif)
+	log_event("NOTIF", "CREATE", "info", f"Notificacion creada: {notif.notif_id}")
 	return notif
 
 
@@ -146,6 +157,7 @@ def listar_notificaciones_medico(
 	medico_id: UUID,
 	db: Session = Depends(get_db),
 ) -> list[NotificacionResponse]:
+	log_event("NOTIF", "LIST_MED", "debug", f"Listar notificaciones medico={medico_id}")
 	stmt = (
 		select(Notificacion)
 		.where(Notificacion.medico_id == medico_id)
@@ -157,9 +169,11 @@ def listar_notificaciones_medico(
 
 @app.patch("/notificaciones/{notif_id}/leida", response_model=MessageResponse, tags=["notificaciones"])
 def marcar_leida(notif_id: UUID, db: Session = Depends(get_db)) -> MessageResponse:
+	log_event("NOTIF", "MARK_READ", "info", f"Marcar leida notif={notif_id}")
 	stmt = select(Notificacion).where(Notificacion.notif_id == notif_id)
 	notif = db.scalar(stmt)
 	if not notif:
+		log_event("NOTIF", "MARK_READ", "warning", f"Notificacion no encontrada: {notif_id}")
 		raise HTTPException(status_code=404, detail="Notificacion no encontrada")
 	notif.leida = True
 	db.commit()
@@ -168,6 +182,7 @@ def marcar_leida(notif_id: UUID, db: Session = Depends(get_db)) -> MessageRespon
 
 @app.patch("/notificaciones/medico/{medico_id}/leer-todas", response_model=MessageResponse, tags=["notificaciones"])
 def marcar_todas_leidas(medico_id: UUID, db: Session = Depends(get_db)) -> MessageResponse:
+	log_event("NOTIF", "MARK_ALL_READ", "info", f"Marcar todas leidas medico={medico_id}")
 	stmt = update(Notificacion).where(
 		Notificacion.medico_id == medico_id,
 		Notificacion.leida == False,

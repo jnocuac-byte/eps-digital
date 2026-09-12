@@ -19,6 +19,8 @@ from app.crud import (
 	update_user,
 )
 from app.database import Base, engine, get_db
+from app.core.logger import setup_logger, log_event
+from app.core.error_handler import register_exception_handlers
 from app.schemas import (
 	AfiliacionCreate,
 	AfiliacionResponse,
@@ -35,8 +37,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    setup_logger()
+    log_event("MAIN", "INIT", "info", "Iniciando User Service...")
     Base.metadata.create_all(bind=engine)
+    log_event("MAIN", "INIT", "info", "Base de datos inicializada")
+    log_event("MAIN", "INIT", "info", "User Service listo")
     yield
+    log_event("MAIN", "SHUTDOWN", "info", "User Service finalizando")
 
 app = FastAPI(
 	title="User Service",
@@ -44,6 +51,8 @@ app = FastAPI(
 	version="1.0.0",
     lifespan=lifespan,
 )
+
+register_exception_handlers(app)
 
 origins = [
     "https://eps-digital-cn2h.onrender.com",
@@ -96,9 +105,13 @@ def _status_from_value_error(error: ValueError, default_status: int) -> int:
 )
 def create_user_endpoint(user_data: UserCreate, db: Session = Depends(get_db)) -> UserResponse:
 	"""Crea el perfil de usuario en el servicio."""
+	log_event("USER", "CREATE", "info", f"Crear usuario: doc={user_data.numero_documento}, correo={user_data.correo}")
 	try:
-		return create_user(db, user_data)
+		usuario = create_user(db, user_data)
+		log_event("USER", "CREATE", "info", f"Usuario creado: {usuario.usuario_id}")
+		return usuario
 	except ValueError as exc:
+		log_event("USER", "CREATE", "warning", f"Error creando usuario: {exc}")
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
@@ -114,8 +127,10 @@ def buscar_usuario_por_documento_endpoint(
 	db: Session = Depends(get_db),
 ) -> UserLookupResponse:
 	"""Busca un usuario por tipo y numero de documento."""
+	log_event("USER", "BUSCAR", "info", f"Buscar usuario: tipo={tipo_documento}, num={numero_documento}")
 	usuario = get_user_by_tipo_y_numero_documento(db, tipo_documento, numero_documento)
 	if not usuario:
+		log_event("USER", "BUSCAR", "warning", f"Usuario no encontrado: {tipo_documento}-{numero_documento}")
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND,
 			detail="Usuario no encontrado para el documento enviado",
@@ -137,8 +152,10 @@ def buscar_usuario_por_documento_endpoint(
 )
 def get_user_endpoint(usuario_id: UUID, db: Session = Depends(get_db)) -> UserResponse:
 	"""Consulta un usuario por su identificador."""
+	log_event("USER", "GET", "debug", f"Obtener usuario={usuario_id}")
 	usuario = get_user_by_id(db, usuario_id)
 	if not usuario:
+		log_event("USER", "GET", "warning", f"Usuario no encontrado: {usuario_id}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
 	return usuario
 
@@ -158,9 +175,13 @@ def update_user_endpoint(
 	db: Session = Depends(get_db),
 ) -> UserResponse:
 	"""Actualiza parcialmente los datos personales del usuario."""
+	log_event("USER", "UPDATE", "info", f"Actualizar usuario={usuario_id}")
 	try:
-		return update_user(db, usuario_id, user_data)
+		usuario = update_user(db, usuario_id, user_data)
+		log_event("USER", "UPDATE", "info", f"Usuario actualizado: {usuario_id}")
+		return usuario
 	except ValueError as exc:
+		log_event("USER", "UPDATE", "warning", f"Error actualizando usuario {usuario_id}: {exc}")
 		status_code = _status_from_value_error(exc, status.HTTP_400_BAD_REQUEST)
 		raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
@@ -173,10 +194,13 @@ def update_user_endpoint(
 )
 def delete_user_endpoint(usuario_id: UUID, db: Session = Depends(get_db)) -> MessageResponse:
 	"""Elimina un usuario de forma permanente."""
+	log_event("USER", "DELETE", "warning", f"Eliminar usuario={usuario_id}")
 	try:
 		delete_user(db, usuario_id)
+		log_event("USER", "DELETE", "info", f"Usuario eliminado: {usuario_id}")
 		return MessageResponse(message="Usuario eliminado correctamente")
 	except ValueError as exc:
+		log_event("USER", "DELETE", "warning", f"Error eliminando usuario {usuario_id}: {exc}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
@@ -191,6 +215,7 @@ def get_medical_info_endpoint(
 	db: Session = Depends(get_db),
 ) -> MedicalInfoResponse | None:
 	"""Obtiene la informacion medica de un usuario."""
+	log_event("USER", "GET_MEDICAL", "debug", f"Info medica usuario={usuario_id}")
 	return get_medical_info(db, usuario_id)
 
 
@@ -206,9 +231,13 @@ def upsert_medical_info_endpoint(
 	db: Session = Depends(get_db),
 ) -> MedicalInfoResponse:
 	"""Crea o actualiza la informacion medica del usuario."""
+	log_event("USER", "UPSERT_MEDICAL", "info", f"Upsert info medica usuario={usuario_id}")
 	try:
-		return create_or_update_medical_info(db, usuario_id, info_data)
+		info = create_or_update_medical_info(db, usuario_id, info_data)
+		log_event("USER", "UPSERT_MEDICAL", "info", f"Info medica guardada usuario={usuario_id}")
+		return info
 	except ValueError as exc:
+		log_event("USER", "UPSERT_MEDICAL", "warning", f"Error guardando info medica: {exc}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
@@ -220,6 +249,7 @@ def upsert_medical_info_endpoint(
 )
 def get_afiliacion_endpoint(usuario_id: UUID, db: Session = Depends(get_db)) -> AfiliacionResponse | None:
 	"""Obtiene la afiliacion de un usuario."""
+	log_event("USER", "GET_AFIL", "debug", f"Afiliacion usuario={usuario_id}")
 	return get_afiliacion(db, usuario_id)
 
 
@@ -239,9 +269,13 @@ def create_afiliacion_endpoint(
 	db: Session = Depends(get_db),
 ) -> AfiliacionResponse:
 	"""Crea la afiliacion del usuario."""
+	log_event("USER", "CREATE_AFIL", "info", f"Crear afiliacion usuario={usuario_id}")
 	try:
-		return create_afiliacion(db, usuario_id, afiliacion_data)
+		afil = create_afiliacion(db, usuario_id, afiliacion_data)
+		log_event("USER", "CREATE_AFIL", "info", f"Afiliacion creada usuario={usuario_id}")
+		return afil
 	except ValueError as exc:
+		log_event("USER", "CREATE_AFIL", "warning", f"Error creando afiliacion: {exc}")
 		status_code = _status_from_value_error(exc, status.HTTP_400_BAD_REQUEST)
 		raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
@@ -261,9 +295,13 @@ def update_afiliacion_estado_endpoint(
 	db: Session = Depends(get_db),
 ) -> AfiliacionResponse:
 	"""Actualiza el estado de la afiliacion de un usuario."""
+	log_event("USER", "UPDATE_AFIL", "info", f"Actualizar estado afiliacion usuario={usuario_id}, estado={payload.estado}")
 	try:
-		return update_afiliacion_estado(db, usuario_id, payload.estado)
+		afil = update_afiliacion_estado(db, usuario_id, payload.estado)
+		log_event("USER", "UPDATE_AFIL", "info", f"Afiliacion actualizada usuario={usuario_id}")
+		return afil
 	except ValueError as exc:
+		log_event("USER", "UPDATE_AFIL", "warning", f"Error actualizando afiliacion: {exc}")
 		status_code = _status_from_value_error(exc, status.HTTP_400_BAD_REQUEST)
 		raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
@@ -279,8 +317,10 @@ def get_usuario_completo_endpoint(
 	db: Session = Depends(get_db),
 ) -> UsuarioCompletoResponse:
 	"""Retorna perfil completo de usuario con secciones medica y afiliacion."""
+	log_event("USER", "GET_FULL", "info", f"Perfil completo usuario={usuario_id}")
 	usuario = get_user_by_id(db, usuario_id)
 	if not usuario:
+		log_event("USER", "GET_FULL", "warning", f"Usuario no encontrado: {usuario_id}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
 
 	informacion_medica = get_medical_info(db, usuario_id)

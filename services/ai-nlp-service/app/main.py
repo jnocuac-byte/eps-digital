@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .core import Orchestrator
 from .core.logger import log_event, setup_logger
+from .core.error_handler import register_exception_handlers
 from .core.model_provider import build_fallback_model
 from .agents.triage_agent import build_triage_agent
 from .agents.scheduling_agent import build_scheduling_agent
@@ -81,6 +82,8 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan,
 )
+
+register_exception_handlers(app)
 
 origins = [
     "https://eps-digital-cn2h.onrender.com",

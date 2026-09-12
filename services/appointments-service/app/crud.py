@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Cita, HistorialEstado, Recordatorio
 from app.schemas import CitaCreate, CitaUpdate
+from app.core.logger import log_event
 
 CATALOG_SERVICE_URL = os.getenv("CATALOG_SERVICE_URL", "http://localhost:8004")
 NOTIFICATIONS_SERVICE_URL = os.getenv("NOTIFICATIONS_SERVICE_URL", "http://localhost:8006")
@@ -46,15 +47,18 @@ def _obtener_medico_automatico(
 	"""
 	servicio_nombre = TIPO_SERVICIO_A_SERVICIO.get(tipo_servicio)
 	if not servicio_nombre:
+		log_event("CITAS", "AUTO_MED", "warning", f"Tipo de servicio no valido: {tipo_servicio}")
 		return None
 
 	try:
+		log_event("CITAS", "AUTO_MED", "info", f"Buscando medico automatico: serv={servicio_nombre}, fecha={fecha_cita}")
 		with httpx.Client(timeout=10.0) as client:
 			resp_servicios = client.get(
 				f"{CATALOG_SERVICE_URL}/servicios",
 				params={"solo_activos": True},
 			)
 			if resp_servicios.status_code != 200:
+				log_event("CITAS", "AUTO_MED", "warning", f"Catalog servicios status={resp_servicios.status_code}")
 				return None
 			servicios = resp_servicios.json()
 			servicio_obj = next(
@@ -62,6 +66,7 @@ def _obtener_medico_automatico(
 				None,
 			)
 			if not servicio_obj:
+				log_event("CITAS", "AUTO_MED", "warning", f"Servicio no encontrado: {servicio_nombre}")
 				return None
 
 			servicio_id = servicio_obj["servicio_id"]
@@ -80,8 +85,10 @@ def _obtener_medico_automatico(
 				params=params,
 			)
 			if resp_medicos.status_code != 200:
+				log_event("CITAS", "AUTO_MED", "warning", f"Catalog medicos status={resp_medicos.status_code}")
 				return None
 			medicos = resp_medicos.json()
+			log_event("CITAS", "AUTO_MED", "info", f"Medicos candidatos: {len(medicos)}")
 			for item in medicos:
 				try:
 					candidato = UUID(item["medico_id"])
@@ -94,9 +101,12 @@ def _obtener_medico_automatico(
 					hora_inicio=hora_inicio,
 					hora_fin=hora_fin,
 				):
+					log_event("CITAS", "AUTO_MED", "info", f"Medico auto-asignado: {candidato}")
 					return candidato
-	except Exception:
+	except Exception as exc:
+		log_event("CITAS", "AUTO_MED", "error", f"Error buscando medico automatico: {exc}")
 		return None
+	log_event("CITAS", "AUTO_MED", "warning", "No hay medicos disponibles para el horario")
 	return None
 
 
@@ -241,6 +251,7 @@ def _crear_notificacion_medico(
 	descripcion: str,
 ) -> None:
 	"""Inserta una notificacion interna en notifications-service (HTTP POST)."""
+	log_event("CITAS", "NOTIF", "info", f"Enviar notificacion a medico={medico_id}, tipo={tipo}")
 	try:
 		with httpx.Client(timeout=5.0) as client:
 			client.post(
@@ -252,17 +263,20 @@ def _crear_notificacion_medico(
 					"descripcion": descripcion,
 				},
 			)
-	except Exception:
-		pass
+		log_event("CITAS", "NOTIF", "info", f"Notificacion enviada a medico={medico_id}")
+	except Exception as exc:
+		log_event("CITAS", "NOTIF", "warning", f"Error enviando notificacion a medico={medico_id}: {exc}")
 
 
 def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 	"""Crea una cita validando fecha futura y disponibilidad horaria del medico."""
+	log_event("CITAS", "CREATE", "info", f"Creando cita: usuario={cita_data.usuario_id}, fecha={cita_data.fecha_cita}")
 	_validar_fecha_futura(cita_data.fecha_cita, cita_data.hora_inicio)
 
 	medico_id = cita_data.medico_id
 
 	if medico_id is None:
+		log_event("CITAS", "CREATE", "info", "Buscando medico automatico")
 		medico_id = _obtener_medico_automatico(
 			db=db,
 			tipo_servicio=cita_data.tipo_servicio,
@@ -272,9 +286,10 @@ def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 			hora_fin=cita_data.hora_fin,
 		)
 		if medico_id is None:
+			log_event("CITAS", "CREATE", "warning", "No hay medicos disponibles")
 			raise ValueError(
-				"No hay médicos disponibles para el servicio y horario seleccionado. "
-				"Por favor selecciona un médico específico o intenta en otro horario."
+				"No hay medicos disponibles para el servicio y horario seleccionado. "
+				"Por favor selecciona un medico especifico o intenta en otro horario."
 			)
 
 	if es_horario_ocupado(
@@ -284,6 +299,7 @@ def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 		hora_inicio=cita_data.hora_inicio,
 		hora_fin=cita_data.hora_fin,
 	):
+		log_event("CITAS", "CREATE", "warning", f"Horario ocupado para medico={medico_id}")
 		raise ValueError("El medico ya tiene una cita programada en ese horario")
 
 	cita_data.medico_id = medico_id
@@ -294,9 +310,11 @@ def create_cita(db: Session, cita_data: CitaCreate) -> Cita:
 		db.commit()
 	except IntegrityError as exc:
 		db.rollback()
+		log_event("CITAS", "CREATE", "error", f"Error de integridad creando cita: {exc}")
 		raise ValueError(f"No se pudo crear la cita: {exc}") from exc
 
 	db.refresh(nueva_cita)
+	log_event("CITAS", "CREATE", "info", f"Cita creada: cita_id={nueva_cita.cita_id}")
 
 	_crear_notificacion_medico(
 		medico_id=nueva_cita.medico_id,
@@ -447,6 +465,7 @@ def update_cita(db: Session, cita_id: UUID, cita_data: CitaUpdate) -> Cita:
 
 def cancelar_cita(db: Session, cita_id: UUID, motivo: str | None, realizado_por: UUID) -> Cita:
 	"""Cancela una cita solo si esta programada y registra historial."""
+	log_event("CITAS", "CANCEL", "info", f"Cancelando cita={cita_id}, motivo={motivo}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise ValueError(f"No existe cita con id {cita_id}")
@@ -473,6 +492,7 @@ def cancelar_cita(db: Session, cita_id: UUID, motivo: str | None, realizado_por:
 	)
 
 	db.refresh(cita)
+	log_event("CITAS", "CANCEL", "info", f"Cita cancelada: {cita_id}")
 	return cita
 
 
@@ -484,6 +504,7 @@ def cambiar_estado_cita(
 	realizado_por: UUID,
 ) -> Cita:
 	"""Cambia el estado de una cita programada y registra el historial."""
+	log_event("CITAS", "CHANGE_STATE", "info", f"Cambiar estado cita={cita_id} a {nuevo_estado}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise ValueError(f"No existe cita con id {cita_id}")
@@ -515,6 +536,7 @@ def cambiar_estado_cita(
 	)
 
 	db.refresh(cita)
+	log_event("CITAS", "CHANGE_STATE", "info", f"Estado cambiado en cita={cita_id}: {estado_anterior} -> {nuevo_estado}")
 	return cita
 
 
@@ -528,6 +550,7 @@ def reprogramar_cita(
 	motivo: str | None = None,
 ) -> Cita:
 	"""Reprograma una cita programada validando disponibilidad y registrando historial."""
+	log_event("CITAS", "RESCHEDULE", "info", f"Reprogramar cita={cita_id}, nueva_fecha={nueva_fecha}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise ValueError(f"No existe cita con id {cita_id}")
@@ -567,17 +590,20 @@ def reprogramar_cita(
 	)
 
 	db.refresh(cita)
+	log_event("CITAS", "RESCHEDULE", "info", f"Cita reprogramada: {cita_id}")
 	return cita
 
 
 def delete_cita(db: Session, cita_id: UUID) -> bool:
 	"""Elimina una cita de forma permanente."""
+	log_event("CITAS", "DELETE", "warning", f"Eliminar cita={cita_id}")
 	cita = get_cita_by_id(db, cita_id)
 	if not cita:
 		raise ValueError(f"No existe cita con id {cita_id}")
 
 	db.delete(cita)
 	db.commit()
+	log_event("CITAS", "DELETE", "info", f"Cita eliminada: {cita_id}")
 	return True
 
 
