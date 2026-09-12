@@ -168,6 +168,7 @@ class Orchestrator:
         log_event("ORCH", "TRIAGE", "info", f"Invocando triage_agent conv={conversation_id[:8]}")
 
         try:
+            self._triage_agent.messages = []
             response = self._triage_agent(full_message)
 
             # Extraer clasificación (Pydantic, dict o JSON crudo)
@@ -286,6 +287,7 @@ class Orchestrator:
         log_event("ORCH", "SCHEDULING", "info", f"Invocando scheduling_agent conv={conversation_id[:8]}")
 
         try:
+            self._scheduling_agent.messages = []
             response = self._scheduling_agent(full_message)
 
             # Extraer texto de la respuesta
