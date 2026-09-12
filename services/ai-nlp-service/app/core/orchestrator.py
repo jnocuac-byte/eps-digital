@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 from strands import Agent
@@ -14,6 +16,8 @@ from .logger import log_event
 MAX_HISTORY_MESSAGES = 6
 
 _ROUTING_KEY_PREFIX = "strands:model_routing"
+ZONA_BOGOTA = ZoneInfo("America/Bogota")
+DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
 def _registrar_hook_provider(agent: Agent) -> None:
@@ -279,7 +283,14 @@ class Orchestrator:
         state.active_agent = "scheduling"
 
         # Construir contexto del paciente para el agente
+        ahora_bogota = datetime.now(ZONA_BOGOTA)
+        fecha_actual_str = f"{ahora_bogota.strftime('%Y-%m-%d')} ({DIAS_SEMANA[ahora_bogota.weekday()]})"
+
         context_parts: list[str] = []
+        context_parts.append(
+            f"Fecha actual del sistema: {fecha_actual_str}. "
+            "NUNCA propongas ni consultes fechas anteriores a esta."
+        )
         if usuario_id:
             context_parts.append(f"usuario_id del paciente: {usuario_id}")
         if state.specialty_id:
