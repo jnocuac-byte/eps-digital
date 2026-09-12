@@ -56,17 +56,17 @@ async def lifespan(app: FastAPI):
     scheduling_model = None
     try:
         triage_model = build_fallback_model(
-            order=["mistral", "gemini", "cerebras", "groq"],
+            order=["gemini-1", "gemini-2", "gemini-3", "groq", "cerebras", "mistral"],
         )
-        log_event("MAIN", "INIT", "info", "Triage ModelRouter: Mistral → Gemini → Cerebras → Groq")
+        log_event("MAIN", "INIT", "info", "Triage ModelRouter: Gemini-1 → Gemini-2 → Gemini-3 → Groq → Cerebras → Mistral")
     except ValueError as exc:
         log_event("MAIN", "INIT", "warning", f"Triage ModelRouter no disponible: {exc}")
 
     try:
         scheduling_model = build_fallback_model(
-            order=["gemini", "mistral", "cerebras"],
+            order=["gemini-1", "gemini-2", "gemini-3", "cerebras", "mistral"],
         )
-        log_event("MAIN", "INIT", "info", "Scheduling ModelRouter: Gemini → Mistral → Cerebras")
+        log_event("MAIN", "INIT", "info", "Scheduling ModelRouter: Gemini-1 → Gemini-2 → Gemini-3 → Cerebras → Mistral")
     except ValueError as exc:
         log_event("MAIN", "INIT", "warning", f"Scheduling ModelRouter no disponible: {exc}")
 

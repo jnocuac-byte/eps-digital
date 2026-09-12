@@ -35,21 +35,37 @@ def _build_provider_pool() -> dict[str, RoutingCandidate]:
             name="groq",
         )
 
-    # Gemini
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if gemini_key:
-        try:
-            from strands.models.gemini import GeminiModel
+    # Gemini — múltiples keys para rotación automática (rate limit distribuido)
+    try:
+        from strands.models.gemini import GeminiModel
 
-            pool["gemini"] = RoutingCandidate(
-                model=GeminiModel(
-                    client_args={"api_key": gemini_key},
-                    model_id="gemini-3.6-flash",
-                ),
-                name="gemini",
-            )
-        except ImportError:
-            log_event("MODEL", "INIT", "warning", "Gemini omitido: strands-agents[gemini] no instalado")
+        gemini_registered = False
+        for i in range(1, 4):
+            key = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
+            if key:
+                name = f"gemini-{i}"
+                pool[name] = RoutingCandidate(
+                    model=GeminiModel(
+                        client_args={"api_key": key},
+                        model_id="gemini-3.6-flash",
+                    ),
+                    name=name,
+                )
+                gemini_registered = True
+
+        # Fallback: si no hay keys numeradas, usar GEMINI_API_KEY como gemini-1
+        if not gemini_registered:
+            fallback_key = os.getenv("GEMINI_API_KEY", "").strip()
+            if fallback_key:
+                pool["gemini-1"] = RoutingCandidate(
+                    model=GeminiModel(
+                        client_args={"api_key": fallback_key},
+                        model_id="gemini-3.6-flash",
+                    ),
+                    name="gemini-1",
+                )
+    except ImportError:
+        log_event("MODEL", "INIT", "warning", "Gemini omitido: strands-agents[gemini] no instalado")
 
     # Cerebras — compatible con OpenAI API
     cerebras_key = os.getenv("CEREBRAS_API_KEY", "").strip()
