@@ -11,6 +11,23 @@ from .logger import log_event
 
 MAX_HISTORY_MESSAGES = 6
 
+_ROUTING_KEY_PREFIX = "strands:model_routing"
+
+
+def _extraer_provider_usado(invocation_state: dict) -> str:
+    """Extrae el nombre del proveedor LLM seleccionado por el ModelRouter.
+
+    Lee el _RoutingState almacenado en invocation_state bajo la key
+    ``strands:model_routing:<agent_hex>:<router_hex>`` y retorna
+    ``state.candidate.name`` (ej: "mistral", "gemini").
+    """
+    for key, value in invocation_state.items():
+        if key.startswith(_ROUTING_KEY_PREFIX):
+            candidate = getattr(value, "candidate", None)
+            if candidate is not None:
+                return getattr(candidate, "name", "unknown")
+    return "unknown"
+
 
 def _extraer_explicacion(response: Any) -> str | None:
     """Extrae explicacion_al_paciente de cualquier formato de respuesta del LLM.
@@ -169,7 +186,9 @@ class Orchestrator:
 
         try:
             self._triage_agent.messages = []
-            response = self._triage_agent(full_message)
+            invocation_state: dict = {}
+            response = self._triage_agent(full_message, invocation_state=invocation_state)
+            provider = _extraer_provider_usado(invocation_state)
 
             # Extraer clasificación (Pydantic, dict o JSON crudo)
             classification = _extraer_clasificacion(response)
@@ -193,7 +212,8 @@ class Orchestrator:
 
                 log_event(
                     "ORCH", "TRIAGE", "info",
-                    f"Clasificacion: especialidad={esp_nombre}, urgencia={urgencia}"
+                    f"Clasificacion: especialidad={esp_nombre}, urgencia={urgencia} "
+                    f"provider={provider}"
                 )
 
                 # Actualizar estado (incluir symptoms_summary explícitamente)
@@ -288,7 +308,9 @@ class Orchestrator:
 
         try:
             self._scheduling_agent.messages = []
-            response = self._scheduling_agent(full_message)
+            invocation_state: dict = {}
+            response = self._scheduling_agent(full_message, invocation_state=invocation_state)
+            provider = _extraer_provider_usado(invocation_state)
 
             # Extraer texto de la respuesta
             respuesta = str(response)
@@ -297,6 +319,12 @@ class Orchestrator:
                     "No pude procesar tu solicitud de agendamiento. "
                     "Por favor, intenta de nuevo o indica que especialidad necesitas."
                 )
+
+            log_event(
+                "ORCH", "SCHEDULING", "info",
+                f"Respuesta scheduling: {len(respuesta)} chars "
+                f"provider={provider}"
+            )
 
             return respuesta
 
