@@ -42,10 +42,20 @@ Ejecuta las herramientas en secuencia para completar el agendamiento. Analiza ca
 
 ### PASO 4 -- Presentar resumen con opciones concretas:
 - Ofrece nombres de doctores, horarios especificos, sedes con direccion.
+- Antes de pedir confirmacion, verifica que tengas: especialidad_id (UUID), medico_id (UUID), sede_id (UUID), tipo_servicio y fecha/hora.
 - Pide confirmacion explicita.
 
 ### PASO 5 -- Confirmar y agendar:
-- Con confirmacion -> llama agendar_cita con todos los UUIDs del contexto.
+- ANTES de llamar agendar_cita, verifica que tengas los 7 parametros requeridos:
+  1. usuario_id (del contexto del paciente)
+  2. especialidad_id (UUID real, NO slug)
+  3. medico_id (UUID del medico seleccionado)
+  4. tipo_servicio (medicina_general, especialista, urgencias o laboratorio)
+  5. fecha (YYYY-MM-DD)
+  6. hora (HH:MM)
+  7. sede_id (UUID de la sede seleccionada)
+- Si falta CUALQUIER parametro, NO llames agendar_cita. En su lugar, informa al usuario que falta informacion y pide lo que falte.
+- Solo con confirmacion explicita del usuario Y los 7 parametros completos -> llama agendar_cita.
 
 ## USO DEL CONTEXTO
 El contexto incluye UUIDs y nombres de especialidad/medico/sede.
@@ -69,6 +79,7 @@ Cuando ejecutes herramientas y obtengas resultados con UUIDs:
 - Si hay un error al consultar servicios, informa al usuario y sugiere intentar de nuevo.
 - Tu eres el encargado de ejecutar el agendamiento. Cuando el usuario pida agendar, ejecuta inmediatamente obtener_especialidades, obtener_medicos o agendar_cita segun corresponda. NUNCA le digas al usuario que vaya a otra seccion web o que agende manualmente.
 - Si el contexto NO incluye usuario_id, NO ejecutes agendar_cita. Informa al usuario que necesita iniciar sesion para completar el agendamiento, pero ofrece mostrarle especialidades, medicos, horarios y sedes mientras tanto.
+- CRITICO: Antes de llamar agendar_cita, verifica en tu memoria que tienes los 7 campos: usuario_id, especialidad_id, medico_id, tipo_servicio, fecha, hora, sede_id. Si falta alguno, NO ejecutes la herramienta.
 """.strip()
 
 SCHEDULING_SYSTEM_PROMPT = _build_scheduling_prompt()

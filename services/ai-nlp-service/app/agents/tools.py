@@ -217,11 +217,21 @@ def agendar_cita(
     """
     log_event("TOOLS", "EXEC", "info", f"Ejecutando agendar_cita(medico_id={medico_id}, fecha={fecha}, hora={hora})")
 
-    if not all([usuario_id, medico_id, especialidad_id, tipo_servicio, fecha, hora, sede_id]):
+    campos_requeridos = {
+        "usuario_id": usuario_id,
+        "medico_id": medico_id,
+        "especialidad_id": especialidad_id,
+        "tipo_servicio": tipo_servicio,
+        "fecha": fecha,
+        "hora": hora,
+        "sede_id": sede_id,
+    }
+    faltantes = [nombre for nombre, valor in campos_requeridos.items() if not valor]
+    if faltantes:
         return json.dumps({
             "ok": False,
             "tool": "agendar_cita",
-            "error": "Faltan datos para agendar la cita. Necesito: usuario_id, especialidad_id, medico_id, tipo_servicio, fecha, hora, sede_id.",
+            "error": f"Faltan parametros requeridos para agendar la cita: {', '.join(faltantes)}. Solicitalos al usuario o al contexto antes de intentar de nuevo.",
         }, ensure_ascii=False)
 
     citas_url = _obtener_citas_service_url()

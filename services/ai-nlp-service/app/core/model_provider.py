@@ -37,14 +37,10 @@ def build_fallback_model() -> Any:
                     "base_url": "https://api.groq.com/openai/v1",
                 },
                 model_id="openai/gpt-oss-120b",
-                params={
-                    "include_reasoning": False,
-                    "reasoning_effort": "low",
-                },
             ),
             name="groq",
         ))
-        log_event("MODEL", "INIT", "info", "Groq provider registrado (openai/gpt-oss-120b, reasoning disabled)")
+        log_event("MODEL", "INIT", "info", "Groq provider registrado (openai/gpt-oss-120b)")
 
     # 2. Gemini (secundario)
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
