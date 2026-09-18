@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
 	Base.metadata.create_all(bind=engine)
 	configurar_sendgrid()
 	consumer_thread = start_background_consumer()
-	log_event("MAIN", "INIT", "info", f"Consumer activo: {consumer_thread.is_alive()}")
+	log_event("MAIN", "INIT", "info", f"Consumer activo: {consumer_thread is not None and consumer_thread.is_alive()}")
 	log_event("MAIN", "INIT", "info", "Notifications Service listo")
 	yield
 	log_event("MAIN", "SHUTDOWN", "info", "Notifications Service finalizando")

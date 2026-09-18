@@ -18,7 +18,6 @@ from .templates import (
 )
 from .core.logger import log_event
 
-RABBITMQ_DEFAULT_URL = "amqps://jyzkesmj:xTxbKJtX0yD97CnGVgCMxTDRATEAszTY@shark.rmq.cloudamqp.com/jyzkesmj"
 COLAS_EVENTOS = (
 	"cita_confirmada",
 	"cita_cancelada",
@@ -31,7 +30,10 @@ def configurar_rabbitmq() -> Tuple[pika.BlockingConnection, str]:
 	"""Conecta a RabbitMQ y retorna conexion y cola principal."""
 	log_event("NOTIF", "RABBITMQ", "info", "Conectando a RabbitMQ")
 	load_dotenv()
-	rabbitmq_url = os.getenv("RABBITMQ_URL", RABBITMQ_DEFAULT_URL)
+	rabbitmq_url = os.getenv("RABBITMQ_URL")
+
+	if not rabbitmq_url:
+		raise ValueError("RABBITMQ_URL no configurado")
 
 	params = pika.URLParameters(rabbitmq_url)
 	params.heartbeat = 30
@@ -139,6 +141,8 @@ def iniciar_consumidor() -> None:
 	log_event("NOTIF", "RABBITMQ", "info", "Iniciando consumidor RabbitMQ")
 	configurar_sendgrid()
 
+	intentos_fallidos = 0
+
 	while True:
 		connection: pika.BlockingConnection | None = None
 		try:
@@ -154,16 +158,26 @@ def iniciar_consumidor() -> None:
 				)
 
 			log_event("NOTIF", "RABBITMQ", "info", f"Consumidor activo. Colas: {', '.join(COLAS_EVENTOS)}")
+			intentos_fallidos = 0
 			channel.start_consuming()
-		except (pika.exceptions.AMQPConnectionError, pika.exceptions.ChannelClosedByBroker):
-			log_event("NOTIF", "RABBITMQ", "error", "Conexion RabbitMQ caida. Reintentando en 5 segundos...")
-			time.sleep(5)
 		except KeyboardInterrupt:
 			log_event("NOTIF", "RABBITMQ", "info", "Consumidor detenido manualmente")
 			break
 		except Exception as exc:
-			log_event("NOTIF", "RABBITMQ", "error", f"Error inesperado en consumidor: {exc}. Reintentando en 5 segundos...")
-			time.sleep(5)
+			intentos_fallidos += 1
+			backoff = min(5 * (2 ** (intentos_fallidos - 1)), 30)
+			if intentos_fallidos == 1 or intentos_fallidos % 5 == 0:
+				log_event(
+					"NOTIF", "RABBITMQ", "error",
+					f"Conexion RabbitMQ fallida (intento {intentos_fallidos}). "
+					f"Reintentando en {backoff}s... ({exc})",
+				)
+			else:
+				log_event(
+					"NOTIF", "RABBITMQ", "debug",
+					f"Reconexion {intentos_fallidos}, backoff {backoff}s",
+				)
+			time.sleep(backoff)
 		finally:
 			if connection and connection.is_open:
 				try:
@@ -172,8 +186,16 @@ def iniciar_consumidor() -> None:
 					log_event("NOTIF", "RABBITMQ", "warning", "No se pudo cerrar conexion RabbitMQ limpiamente")
 
 
-def start_background_consumer() -> threading.Thread:
-	"""Ejecuta el consumidor en un thread daemon y retorna el thread."""
+def start_background_consumer() -> threading.Thread | None:
+	"""Ejecuta el consumidor en un thread daemon y retorna el thread.
+
+	Si RABBITMQ_ENABLED=false, no arranca el hilo.
+	"""
+	load_dotenv()
+	if os.getenv("RABBITMQ_ENABLED", "true").lower() == "false":
+		log_event("NOTIF", "RABBITMQ", "info", "Consumidor RabbitMQ deshabilitado (RABBITMQ_ENABLED=false)")
+		return None
+
 	thread = threading.Thread(
 		target=iniciar_consumidor,
 		name="rabbitmq-consumer",
