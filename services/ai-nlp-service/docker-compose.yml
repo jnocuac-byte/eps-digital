@@ -27,6 +27,9 @@ services:
       DATABASE_URL: postgresql://eps_user:eps_password@ainlp-db:5432/eps_ainlp
       GROQ_API_KEY: ${GROQ_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_API_KEY_1: ${GEMINI_API_KEY_1:-}
+      GEMINI_API_KEY_2: ${GEMINI_API_KEY_2:-}
+      GEMINI_API_KEY_3: ${GEMINI_API_KEY_3:-}
       CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}

@@ -1,15 +1,97 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 from strands import Agent
+from strands.hooks.events import AfterModelCallEvent
+from strands.hooks.registry import HookOrder
 
 from .conversation_state import ConversationState, classify_intent, es_uuid_valido
 from .logger import log_event
 
 MAX_HISTORY_MESSAGES = 6
+
+_ROUTING_KEY_PREFIX = "strands:model_routing"
+ZONA_BOGOTA = ZoneInfo("America/Bogota")
+DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+
+def _registrar_hook_provider(agent: Agent) -> None:
+    """Registra un hook que captura el proveedor LLM usado en cada invocación.
+
+    El hook se ejecuta en AfterModelCallEvent (order=60, después del
+    _on_model_result del router en order=50). Lee el _RoutingState de
+    invocation_state y almacena candidate.name en agent._provider_used.
+    """
+
+    def _capturar_provider(event: AfterModelCallEvent) -> None:
+        for key, value in event.invocation_state.items():
+            if key.startswith(_ROUTING_KEY_PREFIX):
+                candidate = getattr(value, "candidate", None)
+                if candidate is not None:
+                    agent._provider_used = getattr(candidate, "name", "unknown")
+                    return
+        agent._provider_used = "unknown"
+
+    agent.hooks.add_callback(AfterModelCallEvent, _capturar_provider, order=60)
+
+
+def _extraer_explicacion(response: Any) -> str | None:
+    """Extrae explicacion_al_paciente de cualquier formato de respuesta del LLM.
+
+    Maneja 3 casos:
+      1. Objeto Pydantic con .output (structured output exitoso)
+      2. response cuyo str() contiene JSON crudo
+      3. Fallback (no se pudo extraer)
+
+    Returns:
+        Texto de explicación al paciente o None si no se pudo extraer.
+    """
+    # Caso 1: Objeto Pydantic con .output (structured output)
+    if hasattr(response, "output") and response.output is not None:
+        output = response.output
+        if isinstance(output, dict):
+            return output.get("explicacion_al_paciente")
+        return getattr(output, "explicacion_al_paciente", None)
+
+    # Caso 2: response como string que contiene JSON crudo
+    raw = str(response)
+    stripped = raw.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, dict):
+                return data.get("explicacion_al_paciente")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return None
+
+
+def _extraer_clasificacion(response: Any) -> dict | Any | None:
+    """Extrae el objeto de clasificación de cualquier formato de respuesta.
+
+    Retorna el objeto Pydantic/dict original para extraer campos adicionales
+    (resumen_clinico, especialidad, etc.).
+    """
+    if hasattr(response, "output") and response.output is not None:
+        return response.output
+
+    raw = str(response)
+    stripped = raw.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return None
 
 
 class Orchestrator:
@@ -24,6 +106,8 @@ class Orchestrator:
         self._triage_agent = triage_agent
         self._scheduling_agent = scheduling_agent
         self._states: dict[str, ConversationState] = {}
+        _registrar_hook_provider(triage_agent)
+        _registrar_hook_provider(scheduling_agent)
 
     def get_state(
         self, conversation_id: str, db: Session | None = None
@@ -114,26 +198,45 @@ class Orchestrator:
         log_event("ORCH", "TRIAGE", "info", f"Invocando triage_agent conv={conversation_id[:8]}")
 
         try:
+            self._triage_agent.messages = []
             response = self._triage_agent(full_message)
+            provider = getattr(self._triage_agent, "_provider_used", "unknown")
 
-            # Extraer structured output
-            if hasattr(response, "output") and response.output is not None:
-                classification = response.output
+            # Extraer clasificación (Pydantic, dict o JSON crudo)
+            classification = _extraer_clasificacion(response)
+
+            if classification is not None:
+                # Extraer campos de la clasificación (soporta Pydantic y dict)
+                if isinstance(classification, dict):
+                    esp_id = classification.get("especialidad_sugerida_id")
+                    esp_nombre = classification.get("especialidad_sugerida_nombre")
+                    resumen = classification.get("resumen_clinico")
+                    urgencia = classification.get("nivel_urgencia")
+                    red_flag = classification.get("red_flag", {})
+                    red_flag_detected = red_flag.get("detected", False) if isinstance(red_flag, dict) else False
+                else:
+                    esp_id = getattr(classification, "especialidad_sugerida_id", None)
+                    esp_nombre = getattr(classification, "especialidad_sugerida_nombre", None)
+                    resumen = getattr(classification, "resumen_clinico", None)
+                    urgencia = getattr(classification, "nivel_urgencia", None)
+                    rf = getattr(classification, "red_flag", None)
+                    red_flag_detected = getattr(rf, "detected", False) if rf else False
+
                 log_event(
                     "ORCH", "TRIAGE", "info",
-                    f"Clasificacion: especialidad={classification.especialidad_sugerida_nombre}, "
-                    f"urgencia={classification.nivel_urgencia}"
+                    f"Clasificacion: especialidad={esp_nombre}, urgencia={urgencia} "
+                    f"provider={provider}"
                 )
 
-                # Actualizar estado
-                state.specialty_id = classification.especialidad_sugerida_id
-                state.specialty_name = classification.especialidad_sugerida_nombre
-                state.symptoms_summary = classification.resumen_clinico
-                state.urgency_level = classification.nivel_urgencia
-                state.red_flag_detected = classification.red_flag.detected
+                # Actualizar estado (incluir symptoms_summary explícitamente)
+                state.specialty_id = esp_id
+                state.specialty_name = esp_nombre
+                state.symptoms_summary = resumen
+                state.urgency_level = urgencia
+                state.red_flag_detected = red_flag_detected
 
                 # Detectar handoff automático → scheduling
-                if classification.nivel_urgencia in ("programable", "prioritario"):
+                if urgencia in ("programable", "prioritario"):
                     state.active_agent = "scheduling"
                     state.handoff_context = {
                         "specialty_id": state.specialty_id,
@@ -146,36 +249,13 @@ class Orchestrator:
                         f"Handoff auto: triage → scheduling (specialty={state.specialty_name})"
                     )
 
-            # Extraer respuesta en lenguaje natural (no JSON crudo)
-            if hasattr(response, "output") and response.output is not None:
-                classification = response.output
-                if isinstance(classification, dict):
-                    respuesta = classification.get("explicacion_al_paciente")
-                else:
-                    respuesta = getattr(classification, "explicacion_al_paciente", None)
-                if not respuesta:
-                    esp_nombre = (
-                        classification.get("especialidad_sugerida_nombre")
-                        if isinstance(classification, dict)
-                        else getattr(classification, "especialidad_sugerida_nombre", "desconocida")
-                    )
-                    urgencia = (
-                        classification.get("nivel_urgencia")
-                        if isinstance(classification, dict)
-                        else getattr(classification, "nivel_urgencia", "desconocida")
-                    )
-                    respuesta = (
-                        f"Segun el analisis, se sugiere {esp_nombre} "
-                        f"con nivel de urgencia {urgencia}. "
-                        "Un asistente te ayudara a agendar tu cita."
-                    )
-            else:
-                respuesta = str(response)
-
-            if not respuesta or respuesta.strip() == "":
+            # Extraer respuesta en lenguaje natural (nunca JSON crudo)
+            respuesta = _extraer_explicacion(response)
+            if not respuesta:
                 respuesta = (
-                    "Entiendo tu consulta. Un asistente te podra ayudar con mas detalle. "
-                    "¿Podrias darme mas informacion sobre lo que necesitas?"
+                    f"Segun el analisis, se sugiere {state.specialty_name or 'una especialidad'} "
+                    f"con nivel de urgencia {state.urgency_level or 'a determinar'}. "
+                    "Un asistente te ayudara a agendar tu cita."
                 )
 
             return respuesta
@@ -203,13 +283,24 @@ class Orchestrator:
         state.active_agent = "scheduling"
 
         # Construir contexto del paciente para el agente
+        ahora_bogota = datetime.now(ZONA_BOGOTA)
+        fecha_actual_str = f"{ahora_bogota.strftime('%Y-%m-%d')} ({DIAS_SEMANA[ahora_bogota.weekday()]})"
+
         context_parts: list[str] = []
+        context_parts.append(
+            f"Fecha actual del sistema: {fecha_actual_str}. "
+            "NUNCA propongas ni consultes fechas anteriores a esta."
+        )
         if usuario_id:
             context_parts.append(f"usuario_id del paciente: {usuario_id}")
         if state.specialty_id:
             context_parts.append(f"specialty_id: {state.specialty_id}")
         if state.specialty_name:
             context_parts.append(f"especialidad: {state.specialty_name}")
+        if state.symptoms_summary:
+            context_parts.append(f"sintomas_reportados: {state.symptoms_summary}")
+        if state.urgency_level:
+            context_parts.append(f"nivel_urgencia: {state.urgency_level}")
         if state.selected_doctor_id:
             context_parts.append(f"medico_id: {state.selected_doctor_id}")
         if state.selected_doctor_name:
@@ -235,7 +326,9 @@ class Orchestrator:
         log_event("ORCH", "SCHEDULING", "info", f"Invocando scheduling_agent conv={conversation_id[:8]}")
 
         try:
+            self._scheduling_agent.messages = []
             response = self._scheduling_agent(full_message)
+            provider = getattr(self._scheduling_agent, "_provider_used", "unknown")
 
             # Extraer texto de la respuesta
             respuesta = str(response)
@@ -244,6 +337,12 @@ class Orchestrator:
                     "No pude procesar tu solicitud de agendamiento. "
                     "Por favor, intenta de nuevo o indica que especialidad necesitas."
                 )
+
+            log_event(
+                "ORCH", "SCHEDULING", "info",
+                f"Respuesta scheduling: {len(respuesta)} chars "
+                f"provider={provider}"
+            )
 
             return respuesta
 

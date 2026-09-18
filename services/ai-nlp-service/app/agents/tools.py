@@ -200,6 +200,7 @@ def agendar_cita(
     fecha: str,
     hora: str,
     sede_id: str,
+    descripcion_sintomas: str = "",
 ) -> str:
     """Agenda una cita médica con los datos confirmados por el usuario.
 
@@ -211,6 +212,7 @@ def agendar_cita(
         fecha: Fecha de la cita en formato YYYY-MM-DD (ej: 2026-09-07).
         hora: Hora de la cita en formato HH:MM en 24 horas (ej: 08:00, 14:30).
         sede_id: UUID de la sede/clínica (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
+        descripcion_sintomas: Descripción opcional de los síntomas reportados por el paciente.
 
     Returns:
         JSON con la confirmación: cita_id (UUID), fecha, hora, estado, mensaje.
@@ -249,6 +251,8 @@ def agendar_cita(
         "hora_fin": hora_fin,
         "sede_id": sede_id,
     }
+    if descripcion_sintomas:
+        payload["descripcion_sintomas"] = descripcion_sintomas
     headers = {"Content-Type": "application/json", "X-User-ID": str(usuario_id)}
 
     try:
@@ -278,10 +282,182 @@ def agendar_cita(
         return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
 
 
+@tool
+def consultar_citas_usuario(usuario_id: str) -> str:
+    """Lista las citas activas (programadas) de un usuario.
+
+    Args:
+        usuario_id: UUID del usuario.
+
+    Returns:
+        JSON con la lista de citas: cita_id, fecha, hora, medico, especialidad, estado, sede.
+    """
+    log_event("TOOLS", "EXEC", "info", f"Ejecutando consultar_citas_usuario(usuario_id={usuario_id})")
+
+    if not usuario_id:
+        return json.dumps({"ok": False, "error": "Necesito el usuario_id para buscar sus citas."}, ensure_ascii=False)
+
+    citas_url = _obtener_citas_service_url()
+    if not citas_url:
+        return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
+
+    headers = {"Content-Type": "application/json"}
+    t0 = time.time()
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            url = f"{citas_url}/citas/usuario/{usuario_id}"
+            response = client.get(url, headers=headers)
+            elapsed = round((time.time() - t0) * 1000)
+            if 200 <= response.status_code < 300:
+                todas = response.json()
+                # Filtrar solo citas programadas (activas)
+                programadas = [c for c in todas if c.get("estado") == "programada"]
+                log_event("TOOLS", "HTTP", "debug", f"Citas usuario {usuario_id} -> {len(programadas)} activas ({elapsed}ms)")
+                return json.dumps({
+                    "ok": True,
+                    "citas": programadas,
+                    "total": len(programadas),
+                    "mensaje": f"Encontre {len(programadas)} cita(s) activa(s)." if programadas else "No tienes citas activas.",
+                }, ensure_ascii=False)
+            log_event("TOOLS", "HTTP", "warning", f"Citas usuario {usuario_id} -> {response.status_code} ({elapsed}ms)")
+            return json.dumps({"ok": False, "error": "No pude consultar tus citas."}, ensure_ascii=False)
+    except httpx.TimeoutException:
+        return json.dumps({"ok": False, "error": "La consulta tardo demasiado."}, ensure_ascii=False)
+    except httpx.RequestError:
+        return json.dumps({"ok": False, "error": "Problema de conexion."}, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
+
+
+@tool
+def reagendar_cita(usuario_id: str, cita_id: str, nueva_fecha: str, nueva_hora: str) -> str:
+    """Reprograma una cita existente a una nueva fecha y hora.
+
+    Args:
+        usuario_id: UUID del usuario (requerido para header X-User-ID).
+        cita_id: UUID de la cita a reprogramar.
+        nueva_fecha: Nueva fecha en formato YYYY-MM-DD.
+        nueva_hora: Nueva hora en formato HH:MM (24h).
+
+    Returns:
+        JSON con la confirmación o error.
+    """
+    log_event("TOOLS", "EXEC", "info", f"Ejecutando reagendar_cita(cita_id={cita_id}, fecha={nueva_fecha}, hora={nueva_hora})")
+
+    campos_requeridos = {"usuario_id": usuario_id, "cita_id": cita_id, "nueva_fecha": nueva_fecha, "nueva_hora": nueva_hora}
+    faltantes = [n for n, v in campos_requeridos.items() if not v]
+    if faltantes:
+        return json.dumps({"ok": False, "error": f"Faltan parametros: {', '.join(faltantes)}."}, ensure_ascii=False)
+
+    citas_url = _obtener_citas_service_url()
+    if not citas_url:
+        return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
+
+    nueva_hora_fin = _sumar_minutos_a_hora(nueva_hora, 30)
+    payload = {
+        "nueva_fecha": nueva_fecha,
+        "nueva_hora_inicio": nueva_hora,
+        "nueva_hora_fin": nueva_hora_fin,
+        "motivo": "Reprogramacion por asistente virtual",
+    }
+    headers = {"Content-Type": "application/json", "X-User-ID": str(usuario_id)}
+
+    t0 = time.time()
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            url = f"{citas_url}/citas/{cita_id}/reprogramar"
+            response = client.post(url, json=payload, headers=headers)
+            elapsed = round((time.time() - t0) * 1000)
+            if 200 <= response.status_code < 300:
+                data = response.json()
+                log_event("TOOLS", "HTTP", "debug", f"Reprogramar cita {cita_id} -> OK ({elapsed}ms)")
+                return json.dumps({
+                    "ok": True,
+                    "cita_id": str(data.get("cita_id", "")),
+                    "nueva_fecha": nueva_fecha,
+                    "nueva_hora": nueva_hora,
+                    "estado": data.get("estado", "programada"),
+                    "mensaje": "Cita reprogramada correctamente!",
+                }, ensure_ascii=False)
+            error_msg = "No pude reprogramar la cita."
+            try:
+                detail = response.json().get("detail", "")
+                if detail:
+                    error_msg = detail
+            except Exception:
+                pass
+            log_event("TOOLS", "HTTP", "warning", f"Reprogramar cita {cita_id} -> {response.status_code} ({elapsed}ms)")
+            return json.dumps({"ok": False, "error": error_msg}, ensure_ascii=False)
+    except httpx.TimeoutException:
+        return json.dumps({"ok": False, "error": "La solicitud tardo demasiado."}, ensure_ascii=False)
+    except httpx.RequestError:
+        return json.dumps({"ok": False, "error": "Problema de conexion."}, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
+
+
+@tool
+def cancelar_cita(usuario_id: str, cita_id: str, motivo: str = "") -> str:
+    """Cancela una cita médica existente.
+
+    Args:
+        usuario_id: UUID del usuario (requerido para header X-User-ID).
+        cita_id: UUID de la cita a cancelar.
+        motivo: Motivo opcional de la cancelación.
+
+    Returns:
+        JSON con la confirmación o error.
+    """
+    log_event("TOOLS", "EXEC", "info", f"Ejecutando cancelar_cita(cita_id={cita_id})")
+
+    if not usuario_id or not cita_id:
+        return json.dumps({"ok": False, "error": "Necesito usuario_id y cita_id para cancelar."}, ensure_ascii=False)
+
+    citas_url = _obtener_citas_service_url()
+    if not citas_url:
+        return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
+
+    payload = {"motivo": motivo or "Cancelacion por asistente virtual"}
+    headers = {"Content-Type": "application/json", "X-User-ID": str(usuario_id)}
+
+    t0 = time.time()
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            url = f"{citas_url}/citas/{cita_id}/cancelar"
+            response = client.post(url, json=payload, headers=headers)
+            elapsed = round((time.time() - t0) * 1000)
+            if 200 <= response.status_code < 300:
+                log_event("TOOLS", "HTTP", "debug", f"Cancelar cita {cita_id} -> OK ({elapsed}ms)")
+                return json.dumps({
+                    "ok": True,
+                    "cita_id": str(cita_id),
+                    "estado": "cancelada",
+                    "mensaje": "Cita cancelada correctamente.",
+                }, ensure_ascii=False)
+            error_msg = "No pude cancelar la cita."
+            try:
+                detail = response.json().get("detail", "")
+                if detail:
+                    error_msg = detail
+            except Exception:
+                pass
+            log_event("TOOLS", "HTTP", "warning", f"Cancelar cita {cita_id} -> {response.status_code} ({elapsed}ms)")
+            return json.dumps({"ok": False, "error": error_msg}, ensure_ascii=False)
+    except httpx.TimeoutException:
+        return json.dumps({"ok": False, "error": "La solicitud tardo demasiado."}, ensure_ascii=False)
+    except httpx.RequestError:
+        return json.dumps({"ok": False, "error": "Problema de conexion."}, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
+
+
 SCHEDULING_TOOLS = [
     obtener_especialidades,
     obtener_medicos,
     obtener_sedes,
     obtener_disponibilidad_citas,
     agendar_cita,
+    consultar_citas_usuario,
+    reagendar_cita,
+    cancelar_cita,
 ]

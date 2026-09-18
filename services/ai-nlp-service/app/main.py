@@ -51,19 +51,31 @@ async def lifespan(app: FastAPI):
         log_event("MAIN", "INIT", "error", f"Error al inicializar la base de datos: {exc}")
         raise RuntimeError(f"Error al inicializar la base de datos: ") from exc
 
-    # Inicializar ModelRouter con fallback multi-provider
+    # Inicializar ModelRouters independientes por agente
+    triage_model = None
+    scheduling_model = None
     try:
-        app.state.model = build_fallback_model()
+        triage_model = build_fallback_model(
+            order=["gemini-1", "gemini-2", "gemini-3", "groq", "cerebras", "mistral"],
+        )
+        log_event("MAIN", "INIT", "info", "Triage ModelRouter: Gemini-1 → Gemini-2 → Gemini-3 → Groq → Cerebras → Mistral")
     except ValueError as exc:
-        log_event("MAIN", "INIT", "warning", f"ModelRouter no disponible: {exc}")
-        app.state.model = None
+        log_event("MAIN", "INIT", "warning", f"Triage ModelRouter no disponible: {exc}")
+
+    try:
+        scheduling_model = build_fallback_model(
+            order=["gemini-1", "gemini-2", "gemini-3", "cerebras", "mistral"],
+        )
+        log_event("MAIN", "INIT", "info", "Scheduling ModelRouter: Gemini-1 → Gemini-2 → Gemini-3 → Cerebras → Mistral")
+    except ValueError as exc:
+        log_event("MAIN", "INIT", "warning", f"Scheduling ModelRouter no disponible: {exc}")
 
     # Inicializar agentes Strands y orquestador
-    if app.state.model:
-        triage_agent = build_triage_agent(app.state.model)
-        scheduling_agent = build_scheduling_agent(app.state.model)
+    if triage_model and scheduling_model:
+        triage_agent = build_triage_agent(triage_model)
+        scheduling_agent = build_scheduling_agent(scheduling_model)
         app.state.orchestrator = Orchestrator(triage_agent, scheduling_agent)
-        log_event("MAIN", "INIT", "info", "Orquestador Strands Agents inicializado")
+        log_event("MAIN", "INIT", "info", "Orquestador Strands Agents inicializado (providers independientes)")
     else:
         app.state.orchestrator = None
 
