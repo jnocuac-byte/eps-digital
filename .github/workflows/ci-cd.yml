@@ -64,11 +64,13 @@ jobs:
     steps:
       - name: Disparar Despliegue en Render
         run: |
-          echo "Disparando despliegue de los servicios mediante Deploy Hooks..."
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_AUTH }}
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_USER }}
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_CATALOG }}
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_NOTIFICATION }}
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_APPOINTMENTS }}
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_AINLP }}
-          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND }}
+          echo "Disparando despliegue de los servicios mediante Deploy Hooks en paralelo..."
+          curl -sS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_AUTH }}" -o /dev/null &
+          curl -sS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_USER }}" -o /dev/null &
+          curl -sS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_CATALOG }}" -o /dev/null &
+          curl -sS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_NOTIFICATION }}" -o /dev/null &
+          curl -sS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_APPOINTMENTS }}" -o /dev/null &
+          curl -sS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_AINLP }}" -o /dev/null &
+          curl -sS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND }}" -o /dev/null &
+          wait
+          echo "¡Todos los Deploy Hooks fueron disparados exitosamente!"
