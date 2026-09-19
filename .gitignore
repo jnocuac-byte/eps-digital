@@ -255,3 +255,4 @@ Desktop.ini
 !frontend/src/app/lib/
 
 .agents/*
+*:Zone.Identifier
