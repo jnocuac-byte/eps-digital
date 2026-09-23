@@ -18,7 +18,7 @@ Copia el siguiente contenido y guárdalo en tu repositorio (por ejemplo, en `doc
 ## 1. Acta de Sprint Planning (Planeación)
 
 **Fecha de la reunión:** (18/09/2026)
-**Asistentes:** Andrés Ramos (Scrum Master), (Juan Esteban Nocua, Santiago Pardo)
+**Asistentes:** (Juan Esteban Nocua, Santiago Pardo)
 
 ### Sprint Goal (Meta del Sprint)
 
