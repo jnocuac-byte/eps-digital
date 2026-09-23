@@ -8,17 +8,17 @@ Copia el siguiente contenido y guárdalo en tu repositorio (por ejemplo, en `doc
 
 # Bitácora Scrum — EPS Digital
 
-**Product Owner:** (Nombre del PO)
+**Product Owner:** (EPS digital)
 **Scrum Master:** Andrés Ramos
 **Tablero de trabajo:** GitHub Projects
-**Periodo del Sprint:** (Ingresa las fechas de inicio y fin)
+**Periodo del Sprint:** (18/09/2026-- 25/09/2026 )
 
 ---
 
 ## 1. Acta de Sprint Planning (Planeación)
 
-**Fecha de la reunión:** (Fecha)
-**Asistentes:** Andrés Ramos (Scrum Master), (Nombres del equipo)
+**Fecha de la reunión:** (18/09/2026)
+**Asistentes:** Andrés Ramos (Scrum Master), (Juan Esteban Nocua, Santiago Pardo)
 
 ### Sprint Goal (Meta del Sprint)
 
