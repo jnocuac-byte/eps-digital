@@ -1,5 +1,3 @@
----
-
 # Bitácora Scrum — EPS Digital
 
 **Product Owner:** (EPS digital)
