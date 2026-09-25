@@ -1,9 +1,3 @@
-Para formalizar la metodología Scrum y tener la evidencia clara para la presentación final, necesitas un documento que registre las ceremonias (Planning, Review, Retrospectiva). El tablero que se muestra en el archivo `image_25ac37.png` es la herramienta operativa diaria. Allí se observa que en el "Tablero Scrum - EPS Digital" las historias H-16 (Orquestación en Kubernetes) y H-18 (Base de conocimiento vectorial) están en "In progress", mientras que la H-17 (Pipeline CI/CD automatizado) ya avanzó a "In review". Además, hay 13 historias en la columna "Done" y 1 en "Testing" (H-26).
-
-Como ahora el Scrum Master eres tú, Andrés, tu labor es mantener este registro actualizado al inicio y al final de cada Sprint. A continuación, tienes la estructura exacta en Markdown para documentar la planeación y dejar la evidencia formal.
-
-Copia el siguiente contenido y guárdalo en tu repositorio (por ejemplo, en `docs/scrum/bitacora_sprint_1.md`):
-
 ---
 
 # Bitácora Scrum — EPS Digital
@@ -59,8 +53,8 @@ A continuación, se desglosa el trabajo técnico para las historias seleccionada
 
 ## 2. Acta de Sprint Review (Revisión)
 
-**Fecha de la reunión:** (Fecha de cierre del Sprint, idealmente con la docente)
-**Asistentes:** (Nombres)
+**Fecha de la reunión:** 25/09/2026
+**Asistentes:** Andres Ramos, Santiago Pardo, Juan Nocua
 
 | ID | Historia | ¿Cumplió Definition of Done (DoD)? | Observaciones / Feedback de la Docente |
 | --- | --- | --- | --- |
@@ -74,18 +68,18 @@ A continuación, se desglosa el trabajo técnico para las historias seleccionada
 
 ## 3. Acta de Retrospectiva
 
-**Fecha de la reunión:** (Fecha de cierre del Sprint, solo el equipo de desarrollo)
+**Fecha de la reunión:** 02/10/2026
 
 * **¿Qué hicimos bien?**
-* (Ej: Logramos sacar adelante la historia H-17 rápidamente).
+* .
 
 
 * **¿Qué no salió tan bien o qué impedimentos tuvimos?**
-* (Ej: Problemas configurando los volúmenes persistentes en H-16, falta de tiempo).
+* .
 
 
 * **Acciones de mejora para el próximo Sprint:**
-* (Ej: Dividir las historias de 13 puntos en tareas más pequeñas durante el Planning; hacer dailies más cortas).
+* .
 
 
 
