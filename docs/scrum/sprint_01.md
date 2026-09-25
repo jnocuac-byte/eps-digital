@@ -78,9 +78,3 @@ A continuación, se desglosa el trabajo técnico para las historias seleccionada
 
 * **Acciones de mejora para el próximo Sprint:**
 * .
-
-
-
----
-
-Este documento te sirve como plantilla. Cada vez que inicies un nuevo Sprint, generas uno igual ajustando las historias correspondientes y lo agregas al informe final como tu evidencia de Scrum.
