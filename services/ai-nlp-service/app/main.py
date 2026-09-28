@@ -6,15 +6,17 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from .core import Orchestrator
 from .core.logger import log_event, setup_logger
 from .core.error_handler import register_exception_handlers
 from .core.model_provider import build_fallback_model
+from .core.embeddings import get_gemini_embedding
 from .agents.triage_agent import build_triage_agent
 from .agents.scheduling_agent import build_scheduling_agent
+from .models import KnowledgeChunk
 
 from app.crud import (
     cerrar_conversacion,
@@ -32,6 +34,8 @@ from .schemas import (
     ChatResponse,
     ClasificacionSintomasResponse,
     ConversacionResponse,
+    KnowledgeChunkResultado,
+    KnowledgeSearchResponse,
     MensajeResponse,
 )
 
@@ -342,3 +346,51 @@ def get_clasificacion(
         return None
 
     return ClasificacionSintomasResponse.model_validate(clasificacion)
+
+
+@app.get(
+    "/api/knowledge/search",
+    response_model=KnowledgeSearchResponse,
+    tags=["knowledge"],
+)
+def buscar_conocimiento(
+    query: str = Query(..., min_length=1, max_length=500),
+    limit: int = Query(3, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> KnowledgeSearchResponse:
+    """Busqueda semantica en la base de conocimiento vectorial (H-18)."""
+    try:
+        query_vector = get_gemini_embedding(query, task_type="RETRIEVAL_QUERY")
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Embedding no disponible: {exc}",
+        ) from exc
+
+    distancia = KnowledgeChunk.embedding.cosine_distance(query_vector)
+    filas = (
+        db.query(
+            KnowledgeChunk.tipo,
+            KnowledgeChunk.nombre,
+            KnowledgeChunk.contenido,
+            distancia.label("distancia"),
+        )
+        .order_by(distancia)
+        .limit(limit)
+        .all()
+    )
+
+    resultados = []
+    for fila in filas:
+        distancia_valor = round(float(fila.distancia), 6)
+        resultados.append(
+            KnowledgeChunkResultado(
+                tipo=fila.tipo,
+                nombre=fila.nombre,
+                contenido=fila.contenido,
+                distancia=distancia_valor,
+                similitud=round(1.0 - distancia_valor, 6),
+            )
+        )
+
+    return KnowledgeSearchResponse(consulta=query, limite=limit, resultados=resultados)

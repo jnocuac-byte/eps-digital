@@ -6,6 +6,7 @@ from typing import Optional
 from uuid import UUID as PyUUID
 from uuid import uuid4
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -97,4 +98,21 @@ class ClasificacionSintomas(Base):
 	# Relacion inversa 1:1 hacia la conversacion.
 	conversacion: Mapped[Conversacion] = relationship(
 		"Conversacion", back_populates="clasificacion_sintomas"
+	)
+
+
+class KnowledgeChunk(Base):
+	"""Fragmento de conocimiento con embedding vectorial para busqueda semantica."""
+
+	__tablename__ = "knowledge_chunks"
+
+	chunk_id: Mapped[PyUUID] = mapped_column(
+		UUID(as_uuid=True), primary_key=True, default=uuid4
+	)
+	tipo: Mapped[str] = mapped_column(String(50), nullable=False)
+	nombre: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+	contenido: Mapped[str] = mapped_column(Text, nullable=False)
+	embedding: Mapped[list[float]] = mapped_column(Vector(768), nullable=False)
+	creado_en: Mapped[datetime] = mapped_column(
+		DateTime(timezone=True), nullable=False, default=utc_now
 	)

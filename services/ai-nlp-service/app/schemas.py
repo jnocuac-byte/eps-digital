@@ -91,3 +91,21 @@ class ChatResponse(BaseModel):
 	respuesta: str
 	conversacion_id: UUID
 	clasificacion: ClasificacionSintomasResponse | None = None
+
+
+class KnowledgeChunkResultado(BaseModel):
+	"""Fragmento de conocimiento con su score de similitud semantica."""
+
+	tipo: str
+	nombre: str | None = None
+	contenido: str
+	distancia: float
+	similitud: float
+
+
+class KnowledgeSearchResponse(BaseModel):
+	"""Respuesta de busqueda semantica en la base de conocimiento."""
+
+	consulta: str
+	limite: int
+	resultados: list[KnowledgeChunkResultado]
