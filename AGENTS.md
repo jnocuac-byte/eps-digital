@@ -2,8 +2,7 @@
 
 Plataforma de EPS colombiana para agendamiento de citas médicas con asistente virtual IA.
 Monorepo con dos mundos: microservicios Python/FastAPI (`services/`) y SPA React (`frontend/`).
-Este archivo prioriza visión general, reglas globales y gotchas. Los detalles de implementación
-se resuelven en el contexto de cada sesión leyendo el código fuente.
+Este archivo prioriza visión general, reglas globales y gotchas; los detalles de implementación se resuelven leyendo el código fuente.
 
 ---
 
@@ -46,9 +45,7 @@ services/<svc>/
 └── docker-compose.yml
 ```
 
-Frontend (`frontend/src/`): `main.tsx` → `app/App.tsx` (QueryClientProvider + RouterProvider)
-→ `app/routes.tsx`, con `components/` (layouts, guards, ui/shadcn), `lib/` (apiClient,
-queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `medico/`).
+Frontend (`frontend/src/`): `main.tsx` → `app/App.tsx` (QueryClientProvider + RouterProvider) → `app/routes.tsx`, con `components/` (layouts, guards, ui/shadcn), `lib/` (apiClient, queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `medico/`).
 
 ---
 
@@ -56,6 +53,7 @@ queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `med
 
 | Contexto | Comando |
 |---|---|
+| Stack local completo | `./start-dev.sh` (puertos 8001-8006 + 5173, usa `uv run uvicorn`) |
 | Frontend dev | `cd frontend && npm run dev` (localhost:5173) |
 | Frontend build | `cd frontend && npm run build` (única verificación disponible) |
 | Backend por servicio | `cd services/<svc> && uvicorn app.main:app --reload --port 800X` |
@@ -75,7 +73,7 @@ queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `med
 | user-service | 8002 | `eps_user` (host 5433) | Perfiles `usuarios`, `informacion_medica`, `afiliaciones`. Fuente de búsqueda por documento |
 | appointments-service | 8003 | `eps_citas` (host 5434) | Citas, historial de estados, recordatorios, métricas y slots disponibles (zona `America/Bogota`) |
 | catalog-service | 8004 | `eps_catalogo` (host 5435) | Servicios, especialidades, médicos, sedes, disponibilidad semanal. Borrado lógico (`activo=false`) |
-| ai-nlp-service | 8005 | `eps_ainlp` (host 5436) | Chatbot multi-agente: triaje + agendamiento. LLMProviderFactory con fallback (Gemini→Groq→Cerebras→Mistral). Knowledge base de triaje |
+| ai-nlp-service | 8005 | `eps_ainlp` (host 5436) | Chatbot multi-agente Strands (triaje + agendamiento). ModelRouter con fallback multi-provider. Knowledge base de triaje |
 | notifications-service | 8006 | externa vía `DATABASE_URL` | Consumer RabbitMQ → emails SendGrid; notificaciones in-app para médicos (HTTP API) |
 
 - Cada servicio = su propia BD. **Sin Foreign Keys entre bases**: las referencias cruzadas son
@@ -93,7 +91,9 @@ queryClient), `stores/` (authStore), `types/`, `pages/` (raíz + `admin/` + `med
 - Pydantic v2 (schemas con validadores `field_validator` / `model_validator`)
 - Alembic para migraciones; `psycopg2-binary`; `httpx` para llamadas inter-servicio
 - auth: `bcrypt` (12 rounds) + `python-jose` (JWT HS256); pika (RabbitMQ)
-- ai-nlp: SDK `groq` + `google-genai` + `cerebras-cloud-sdk` + `mistralai` (fallback multi-provider); knowledge base JSON; notifications: `sendgrid` + `pika`
+- ai-nlp: **Strands Agents** (`strands-agents[gemini]`, `strands-agents-tools`) — ModelRouter + FallbackStrategy, `@tool` nativos, structured output; knowledge base JSON
+- notifications: `sendgrid` + `pika`
+- Gestor de paquetes raíz: **uv** (`pyproject.toml` + `uv.lock`); `start-dev.sh` levanta los 6 servicios + frontend local con `uv run uvicorn`
 
 ### Frontend
 - React 18 + Vite 6 + TypeScript + Tailwind CSS 4 (`@tailwindcss/vite`)
@@ -180,7 +180,7 @@ app/
 │   ├── conversation_state.py # Estado de conversación + classify_intent()
 │   └── logger.py             # Logging centralizado
 ├── agents/
-│   ├── tools.py              # 5 @tool Strands (obtener_*, agendar_cita)
+│   ├── tools.py              # 8 @tool Strands (obtener_*, agendar_cita, CRUD de citas)
 │   ├── scheduling_agent.py   # Agent de agendamiento con tools nativas
 │   ├── scheduling/prompt.py  # System prompt de agendamiento
 │   ├── triage_agent.py       # Agent de triaje con TriageAnalysis
@@ -196,24 +196,28 @@ app/
 ```
 
 ### ModelRouter (fallback automático con Strands)
-`build_fallback_model()` en `app/core/model_provider.py` retorna un `ModelRouter`.
-Orden de prioridad: **Groq → Gemini → Cerebras → Mistral**
+`build_fallback_model(order)` en `app/core/model_provider.py` — **un router independiente por agente** (cadenas distintas definidas en `main.py`):
+- TriageAgent: `gemini-1 → gemini-2 → gemini-3 → groq → cerebras → mistral`
+- SchedulingAgent: `gemini-1 → gemini-2 → gemini-3 → cerebras → mistral` (**Groq excluido**: tool calling multi-turn inestable)
 - `FallbackStrategy` de Strands: si un provider retorna 429/5xx, pasa al siguiente
-- Candidates envueltos en `RoutingCandidate(model=..., name="groq")` para logs
-- Groq usa `OpenAIModel` de Strands (NO `openai.OpenAI` directo)
+- Candidates envueltos en `RoutingCandidate(model=..., name="groq")`; el nombre del proveedor usado se registra vía hook `AfterModelCallEvent` en `_registrar_hook_provider()`
+- **Gemini multi-key**: se registran `gemini-1..3` desde `GEMINI_API_KEY_1..3` (fallback: `GEMINI_API_KEY` como `gemini-1`); keys faltantes se omiten
+- Si la `order` pedida no tiene providers configurados, cae al pool completo con warning
 - ⚠ **NUNCA** pasar `include_reasoning` o `reasoning_effort` en `params` de `OpenAIModel` — se desempaquen como kwargs a `client.chat.completions.create()` y causan TypeError
 
 ### Agentes Strands
 - **triage_agent**: `Agent(model=..., tools=[], retry_strategy=None)` → retorna `TriageAnalysis` estructurado
 - **scheduling_agent**: `Agent(model=..., tools=SCHEDULING_TOOLS, retry_strategy=None)` → ejecuta tools de forma autónoma
 - `retry_strategy=None` desactiva reintentos internos; el `FallbackStrategy` maneja failover entre providers
+- ⚠ **Agentes son singletons**: `Agent.messages` acumula entre llamadas → **resetear `agent.messages = []` antes de cada petición** (aislamiento entre usuarios; ya hecho en el orquestador)
 
 ### Contrato Frontend → Backend
 Frontend solo usa `aiApi.chat(mensaje, conversacion_id?, usuario_id?)` → `POST /chat`.
 Respuesta: `{ respuesta, conversacion_id, clasificacion }` (sin cambios).
 
 ### Tools del asistente (Strands @tool)
-Flujo: `obtener_especialidades()` → `obtener_medicos(especialidad_id)` → `obtener_sedes()` → confirmar → `agendar_cita(...)`
+Flujo: `obtener_especialidades()` → `obtener_medicos(especialidad_id)` → `obtener_sedes()` → `obtener_disponibilidad_citas(...)` → confirmar → `agendar_cita(...)`
+Gestión de citas: `consultar_citas_usuario(usuario_id)`, `reagendar_cita(...)`, `cancelar_cita(...)`
 
 **`agendar_cita` requiere 7 parámetros** (todos obligatorios):
 `usuario_id`, `especialidad_id`, `medico_id`, `tipo_servicio`, `fecha`, `hora`, `sede_id`.
@@ -227,7 +231,7 @@ Endpoints correctos del Catalog Service:
 Y para agendar: `POST {CITAS_SERVICE_URL}/citas` con header `X-User-ID`.
 
 Notas:
-- `obtener_disponibilidad_citas` consulta `GET /citas/slots-disponibles` del appointments-service.
+- `obtener_disponibilidad_citas` consulta `GET /citas/slots-disponibles` del appointments-service; este rechaza fechas pasadas → el orquestador **inyecta la fecha actual (America/Bogota)** en el contexto del scheduling agent y el prompt prohíbe proponer horarios no devueltos por la tool.
 - Errores y confirmaciones SIEMPRE en lenguaje natural, sin UUIDs ni tecnicismos.
 - Knowledge base: `app/knowledge/triage_guide.json` (8 especialidades, banderas rojas).
 - `llm_provider.py` fue eliminado (código muerto pre-Strands).
@@ -244,10 +248,9 @@ Notas:
 | `CATALOG_SERVICE_URL` | citas, ai-nlp | médicos disponibles, especialidades, sedes |
 | `NOTIFICATIONS_SERVICE_URL` | citas | notificaciones internas al agendar (`POST /notificaciones`) |
 | `CITAS_SERVICE_URL` | ai-nlp | agendado real desde el chat |
-| `GROQ_API_KEY` | ai-nlp | cliente LLM (fallback principal) |
-| `GEMINI_API_KEY` | ai-nlp | Google Gemini Flash (prioridad 1, opcional) |
-| `CEREBRAS_API_KEY` | ai-nlp | Cerebras AI (prioridad 3, opcional) |
-| `MISTRAL_API_KEY` | ai-nlp | Mistral AI (prioridad 4, opcional) |
+| `GROQ_API_KEY` | ai-nlp | cliente LLM (triage chain) |
+| `GEMINI_API_KEY_1..3` | ai-nlp | Gemini multi-key (prioridad 1-3; fallback `GEMINI_API_KEY` como `gemini-1`) |
+| `CEREBRAS_API_KEY`, `MISTRAL_API_KEY` | ai-nlp | providers opcionales (tras Gemini en las cadenas) |
 | `RABBITMQ_URL` | auth, notifications | broker AMQP (fallback hardcodeado: rotar credenciales) |
 | `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL`/`EMAIL_FROM` | notifications | envío de correos |
 
@@ -264,10 +267,8 @@ Notas:
 
 ## Convenciones de trabajo del agente
 
-- Commits convencionales con descripción en español:
-  `feat(citas): mejorar flujo de agendamiento de citas médicas`
-- Al pedir un commit: **mostrar el comando primero sin ejecutarlo**.
-- Siempre validar sintaxis Python tras editar: `python3 -m py_compile <archivo>`.
+- Commits convencionales con descripción en español (`feat(citas): ...`); al pedir un commit: **mostrar el comando primero sin ejecutarlo**.
+- CI/CD en `.github/workflows/ci-cd.yml` (deploy con hooks); validar Python con `python3 -m py_compile <archivo>`.
 - El frontend no tiene lint/typecheck configurados: verificar cambios con `npm run build`.
 - Tests: carpetas `tests/` por servicio son scripts manuales sin runner; no asumir pytest CI.
 - Cambios de modelo ⇒ migración Alembic en la misma PR, nunca después.
