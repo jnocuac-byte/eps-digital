@@ -1,0 +1,354 @@
+Evidencias H-16 - Orquestacion en Kubernetes (Minikube)
+Fecha: 2026-10-03 00:53:14 UTC
+
+
+==================== 1. Clúster (criterio 1: plataforma Minikube) ====================
+
+$ kubectl get nodes -o wide
+NAME       STATUS   ROLES           AGE   VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION             CONTAINER-RUNTIME
+minikube   Ready    control-plane   20m   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   6.8.0-1064-azure (amd64)   containerd://2.3.4
+
+$ minikube version
+minikube version: v1.39.0
+commit: 7a9f6a841470a207de8cf4bafcccee0969d8ba10
+
+$ kubectl get pods -n ingress-nginx
+NAME                                       READY   STATUS      RESTARTS      AGE
+ingress-nginx-admission-create-krsjm       0/1     Completed   0             20m
+ingress-nginx-admission-patch-w6fvc        0/1     Completed   1 (19m ago)   20m
+ingress-nginx-controller-d7cd8c989-56j45   1/1     Running     0             20m
+
+
+==================== 2. Recursos del namespace (criterios 2, 3 y 5) ====================
+
+$ kubectl get all,ingress,pv,pvc -n eps-digital
+NAME                                         READY   STATUS    RESTARTS   AGE
+pod/ai-nlp-service-59d96bf7c7-lsm2c          1/1     Running   0          3m43s
+pod/appointments-service-77dfb758df-9q7kt    1/1     Running   0          3m44s
+pod/auth-service-7f89598c89-fsh55            1/1     Running   0          3m44s
+pod/catalog-service-6f6b9449cf-l2pbh         1/1     Running   0          3m43s
+pod/frontend-84b994cdb5-psk69                1/1     Running   0          3m43s
+pod/notifications-service-79b8f84497-xmkhn   1/1     Running   0          3m43s
+pod/postgres-0                               1/1     Running   0          17m
+pod/rabbitmq-66f67b8767-4cstv                1/1     Running   0          17m
+pod/redis-6779dc96bf-htmgs                   1/1     Running   0          17m
+pod/user-service-6ddd8d4bf6-k66fp            1/1     Running   0          3m44s
+
+NAME                            TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)              AGE
+service/ai-nlp-service          ClusterIP   10.100.159.53    <none>        8005/TCP             17m
+service/appointments-service    ClusterIP   10.102.145.93    <none>        8003/TCP             17m
+service/auth-service            ClusterIP   10.104.209.173   <none>        8001/TCP             17m
+service/catalog-service         ClusterIP   10.110.174.212   <none>        8004/TCP             17m
+service/frontend                ClusterIP   10.109.229.62    <none>        80/TCP               17m
+service/notifications-service   ClusterIP   10.98.212.220    <none>        8006/TCP             17m
+service/postgres                ClusterIP   10.110.175.166   <none>        5432/TCP             17m
+service/rabbitmq                ClusterIP   10.103.237.45    <none>        5672/TCP,15672/TCP   17m
+service/redis                   ClusterIP   10.104.81.93     <none>        6379/TCP             17m
+service/user-service            ClusterIP   10.107.162.206   <none>        8002/TCP             17m
+
+NAME                                    READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/ai-nlp-service          1/1     1            1           17m
+deployment.apps/appointments-service    1/1     1            1           17m
+deployment.apps/auth-service            1/1     1            1           17m
+deployment.apps/catalog-service         1/1     1            1           17m
+deployment.apps/frontend                1/1     1            1           17m
+deployment.apps/notifications-service   1/1     1            1           17m
+deployment.apps/rabbitmq                1/1     1            1           17m
+deployment.apps/redis                   1/1     1            1           17m
+deployment.apps/user-service            1/1     1            1           17m
+
+NAME                                               DESIRED   CURRENT   READY   AGE
+replicaset.apps/ai-nlp-service-59d96bf7c7          1         1         1       3m43s
+replicaset.apps/ai-nlp-service-5dd664b978          0         0         0       17m
+replicaset.apps/ai-nlp-service-648445c7cd          0         0         0       17m
+replicaset.apps/ai-nlp-service-7797bcdcbb          0         0         0       11m
+replicaset.apps/appointments-service-6494769bf6    0         0         0       11m
+replicaset.apps/appointments-service-77dfb758df    1         1         1       3m44s
+replicaset.apps/appointments-service-b759d7964     0         0         0       17m
+replicaset.apps/appointments-service-f77544756     0         0         0       17m
+replicaset.apps/auth-service-646cd4c466            0         0         0       11m
+replicaset.apps/auth-service-668b4d6678            0         0         0       17m
+replicaset.apps/auth-service-75f669b58b            0         0         0       17m
+replicaset.apps/auth-service-7f89598c89            1         1         1       3m44s
+replicaset.apps/catalog-service-58fb8b8f48         0         0         0       11m
+replicaset.apps/catalog-service-5c9965b7fb         0         0         0       17m
+replicaset.apps/catalog-service-6f6b9449cf         1         1         1       3m43s
+replicaset.apps/catalog-service-79c8bf8568         0         0         0       17m
+replicaset.apps/frontend-6d954fdbdd                0         0         0       17m
+replicaset.apps/frontend-84b994cdb5                1         1         1       3m43s
+replicaset.apps/frontend-84cddbc4bd                0         0         0       11m
+replicaset.apps/frontend-dc9b656c6                 0         0         0       17m
+replicaset.apps/notifications-service-79b8f84497   1         1         1       3m43s
+replicaset.apps/notifications-service-7c9666d844   0         0         0       17m
+replicaset.apps/notifications-service-b6f9d78b4    0         0         0       17m
+replicaset.apps/notifications-service-d7f6884d     0         0         0       11m
+replicaset.apps/rabbitmq-66f67b8767                1         1         1       17m
+replicaset.apps/redis-6779dc96bf                   1         1         1       17m
+replicaset.apps/user-service-58db44747             0         0         0       17m
+replicaset.apps/user-service-67cbcdcc6c            0         0         0       17m
+replicaset.apps/user-service-6ddd8d4bf6            1         1         1       3m44s
+replicaset.apps/user-service-84fc466b55            0         0         0       11m
+
+NAME                        READY   AGE
+statefulset.apps/postgres   1/1     17m
+
+NAME                                     CLASS   HOSTS   ADDRESS        PORTS   AGE
+ingress.networking.k8s.io/eps-api        nginx   *       192.168.49.2   80      17m
+ingress.networking.k8s.io/eps-frontend   nginx   *       192.168.49.2   80      17m
+
+NAME                               CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                          STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+persistentvolume/eps-postgres-pv   2Gi        RWO            Retain           Bound    eps-digital/eps-postgres-pvc   manual         <unset>                          17m
+persistentvolume/eps-redis-pv      1Gi        RWO            Retain           Bound    eps-digital/eps-redis-pvc      manual         <unset>                          17m
+
+NAME                                     STATUS   VOLUME            CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/eps-postgres-pvc   Bound    eps-postgres-pv   2Gi        RWO            manual         <unset>                 17m
+persistentvolumeclaim/eps-redis-pvc      Bound    eps-redis-pv      1Gi        RWO            manual         <unset>                 17m
+
+$ kubectl get pv
+NAME              CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                          STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+eps-postgres-pv   2Gi        RWO            Retain           Bound    eps-digital/eps-postgres-pvc   manual         <unset>                          17m
+eps-redis-pv      1Gi        RWO            Retain           Bound    eps-digital/eps-redis-pvc      manual         <unset>                          17m
+
+
+==================== 3. Probes de liveness/readiness (criterio 4) ====================
+
+$ kubectl describe deployment/auth-service (probes)
+    Liveness:   http-get http://:8001/health delay=45s timeout=5s period=10s successThreshold=1 failureThreshold=6
+    Readiness:  http-get http://:8001/ready delay=20s timeout=5s period=10s successThreshold=1 failureThreshold=6
+
+$ kubectl describe deployment/user-service (probes)
+    Liveness:   http-get http://:8002/health delay=45s timeout=5s period=10s successThreshold=1 failureThreshold=6
+    Readiness:  http-get http://:8002/ready delay=20s timeout=5s period=10s successThreshold=1 failureThreshold=6
+
+$ kubectl describe deployment/appointments-service (probes)
+    Liveness:   http-get http://:8003/health delay=45s timeout=5s period=10s successThreshold=1 failureThreshold=6
+    Readiness:  http-get http://:8003/ready delay=20s timeout=5s period=10s successThreshold=1 failureThreshold=6
+
+$ kubectl describe deployment/catalog-service (probes)
+    Liveness:   http-get http://:8004/health delay=45s timeout=5s period=10s successThreshold=1 failureThreshold=6
+    Readiness:  http-get http://:8004/ready delay=20s timeout=5s period=10s successThreshold=1 failureThreshold=6
+
+$ kubectl describe deployment/ai-nlp-service (probes)
+    Liveness:   http-get http://:8005/health delay=45s timeout=5s period=10s successThreshold=1 failureThreshold=6
+    Readiness:  http-get http://:8005/ready delay=20s timeout=5s period=10s successThreshold=1 failureThreshold=6
+
+$ kubectl describe deployment/notifications-service (probes)
+    Liveness:   http-get http://:8006/health delay=45s timeout=5s period=10s successThreshold=1 failureThreshold=6
+    Readiness:  http-get http://:8006/ready delay=20s timeout=5s period=10s successThreshold=1 failureThreshold=6
+
+$ kubectl describe deployment/frontend (probes)
+    Liveness:      http-get http://:80/ delay=10s timeout=1s period=10s successThreshold=1 failureThreshold=3
+    Readiness:     http-get http://:80/ delay=5s timeout=1s period=5s successThreshold=1 failureThreshold=3
+
+$ kubectl describe pod auth-service-7f89598c89-fsh55 -n eps-digital
+Name:             auth-service-7f89598c89-fsh55
+Namespace:        eps-digital
+Priority:         0
+Service Account:  default
+Node:             minikube/192.168.49.2
+Start Time:       Sat, 03 Oct 2026 00:49:30 +0000
+Labels:           app=auth-service
+                  pod-template-hash=7f89598c89
+Annotations:      kubectl.kubernetes.io/restartedAt: 2026-10-03T00:49:30Z
+Status:           Running
+IP:               10.244.0.30
+IPs:
+  IP:           10.244.0.30
+Controlled By:  ReplicaSet/auth-service-7f89598c89
+Init Containers:
+  esperar-dependencias:
+    Container ID:  containerd://137edc54cee7fc232d0d31b67bd9125ad09eddc971be0443077a4987cdc06184
+    Image:         busybox:1.36
+    Image ID:      docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      sh
+      -c
+      until nc -z postgres 5432; do echo esperando postgres; sleep 2; done; until nc -z rabbitmq 5672; do echo esperando rabbitmq; sleep 2; done
+    State:          Terminated
+      Reason:       Completed
+      Exit Code:    0
+      Started:      Sat, 03 Oct 2026 00:49:31 +0000
+      Finished:     Sat, 03 Oct 2026 00:49:31 +0000
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-s8z8v (ro)
+Containers:
+  auth-service:
+    Container ID:   containerd://f9b9473e5553df4fab51d80c156d1d803475b4ad76ea78ef3ac6d49d88dec4f7
+    Image:          eps-digital/auth-service:latest
+    Image ID:       sha256:cdbbcc92c321d9380002aee2dd0566012dcd6a2d03de846a297def1d3bbf8603
+    Port:           8001/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Sat, 03 Oct 2026 00:49:32 +0000
+    Ready:          True
+    Restart Count:  0
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:      50m
+      memory:   128Mi
+    Liveness:   http-get http://:8001/health delay=45s timeout=5s period=10s successThreshold=1 failureThreshold=6
+    Readiness:  http-get http://:8001/ready delay=20s timeout=5s period=10s successThreshold=1 failureThreshold=6
+    Environment Variables from:
+      eps-config  ConfigMap  Optional: false
+    Environment:
+      POSTGRES_PASSWORD:  <set to the key 'POSTGRES_PASSWORD' in secret 'eps-secrets'>  Optional: false
+      DATABASE_URL:       postgresql://eps_user:$(POSTGRES_PASSWORD)@postgres:5432/eps_auth
+      JWT_SECRET_KEY:     <set to the key 'JWT_SECRET_KEY' in secret 'eps-secrets'>  Optional: false
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-s8z8v (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-s8z8v:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type    Reason     Age    From               Message
+  ----    ------     ----   ----               -------
+  Normal  Scheduled  3m45s  default-scheduler  Successfully assigned eps-digital/auth-service-7f89598c89-fsh55 to minikube
+  Normal  Pulled     3m44s  kubelet            spec.initContainers{esperar-dependencias}: Container image "busybox:1.36" already present on machine and can be accessed by the pod
+  Normal  Created    3m44s  kubelet            spec.initContainers{esperar-dependencias}: Container created
+  Normal  Started    3m44s  kubelet            spec.initContainers{esperar-dependencias}: Container started
+  Normal  Pulled     3m43s  kubelet            spec.containers{auth-service}: Container image "eps-digital/auth-service:latest" already present on machine and can be accessed by the pod
+  Normal  Created    3m43s  kubelet            spec.containers{auth-service}: Container created
+  Normal  Started    3m43s  kubelet            spec.containers{auth-service}: Container started
+
+$ probes de postgres
+{"exec":{"command":["sh","-c","pg_isready -U eps_user -d postgres"]},"failureThreshold":6,"initialDelaySeconds":30,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":5}
+{"exec":{"command":["sh","-c","pg_isready -U eps_user -d postgres"]},"failureThreshold":6,"initialDelaySeconds":10,"periodSeconds":5,"successThreshold":1,"timeoutSeconds":5}
+
+$ probes de redis
+{"exec":{"command":["redis-cli","ping"]},"failureThreshold":3,"initialDelaySeconds":15,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":5}
+{"exec":{"command":["redis-cli","ping"]},"failureThreshold":3,"initialDelaySeconds":5,"periodSeconds":5,"successThreshold":1,"timeoutSeconds":5}
+
+$ probes de rabbitmq
+{"exec":{"command":["rabbitmq-diagnostics","-q","ping"]},"failureThreshold":6,"initialDelaySeconds":60,"periodSeconds":20,"successThreshold":1,"timeoutSeconds":10}
+{"exec":{"command":["rabbitmq-diagnostics","-q","ping"]},"failureThreshold":6,"initialDelaySeconds":30,"periodSeconds":10,"successThreshold":1,"timeoutSeconds":10}
+
+
+==================== 4. URL unica via Ingress (criterio 3) ====================
+
+$ kubectl get ingress -n eps-digital
+NAME           CLASS   HOSTS   ADDRESS        PORTS   AGE
+eps-api        nginx   *       192.168.49.2   80      17m
+eps-frontend   nginx   *       192.168.49.2   80      17m
+
+$ curl http://localhost:8080/ (frontend)
+HTTP 200
+
+$ curl http://localhost:8080/api/auth/health
+{"status":"ok"}
+HTTP 200
+
+$ curl http://localhost:8080/api/auth/ready
+{"status":"ready"}
+HTTP 200
+
+$ curl http://localhost:8080/api/user/health
+{"status":"ok"}
+HTTP 200
+
+$ curl http://localhost:8080/api/user/ready
+{"status":"ready"}
+HTTP 200
+
+$ curl http://localhost:8080/api/citas/health
+{"status":"ok"}
+HTTP 200
+
+$ curl http://localhost:8080/api/citas/ready
+{"status":"ready"}
+HTTP 200
+
+$ curl http://localhost:8080/api/catalogo/health
+{"status":"ok"}
+HTTP 200
+
+$ curl http://localhost:8080/api/catalogo/ready
+{"status":"ready"}
+HTTP 200
+
+$ curl http://localhost:8080/api/ai/health
+{"status":"ok"}
+HTTP 200
+
+$ curl http://localhost:8080/api/ai/ready
+{"status":"ready"}
+HTTP 200
+
+$ curl http://localhost:8080/api/notifications/health
+{"status":"ok","rabbitmq":"connected"}
+HTTP 200
+
+$ curl http://localhost:8080/api/notifications/ready
+{"status":"ready"}
+HTTP 200
+
+
+==================== 5. Persistencia de datos (criterio 5): Postgres y Redis ====================
+--- Antes: escribimos un dato en Postgres y una clave en Redis (valor=prueba-1790988795)
+CREATE TABLE
+INSERT 0 1
+OK
+Postgres antes:
+1|prueba-1790988795
+Redis antes:
+prueba-1790988795
+--- Borrando los pods de Postgres y Redis
+
+$ kubectl delete pod postgres-0 -n eps-digital
+pod "postgres-0" deleted from eps-digital namespace
+
+$ kubectl delete pod redis-6779dc96bf-htmgs -n eps-digital
+pod "redis-6779dc96bf-htmgs" deleted from eps-digital namespace
+Waiting for 1 pods to be ready...
+partitioned roll out complete: 1 new pods have been updated...
+deployment "redis" successfully rolled out
+pod/postgres-0 condition met
+pod/redis-6779dc96bf-t9tmr condition met
+
+$ kubectl get pods -n eps-digital -l app in (postgres,redis)
+NAME                     READY   STATUS    RESTARTS   AGE
+postgres-0               1/1     Running   0          11s
+redis-6779dc96bf-t9tmr   1/1     Running   0          11s
+--- Despues: los datos siguen ahi
+Postgres despues:
+1|prueba-1790988795
+Redis despues:
+prueba-1790988795
+RESULTADO: PERSISTENCIA OK (Postgres y Redis conservaron los datos)
+
+
+==================== 6. Estado final ====================
+
+$ kubectl get pods -n eps-digital
+NAME                                     READY   STATUS    RESTARTS   AGE
+ai-nlp-service-59d96bf7c7-lsm2c          1/1     Running   0          4m1s
+appointments-service-77dfb758df-9q7kt    1/1     Running   0          4m2s
+auth-service-7f89598c89-fsh55            1/1     Running   0          4m2s
+catalog-service-6f6b9449cf-l2pbh         1/1     Running   0          4m1s
+frontend-84b994cdb5-psk69                1/1     Running   0          4m1s
+notifications-service-79b8f84497-xmkhn   1/1     Running   0          4m1s
+postgres-0                               1/1     Running   0          12s
+rabbitmq-66f67b8767-4cstv                1/1     Running   0          17m
+redis-6779dc96bf-t9tmr                   1/1     Running   0          12s
+user-service-6ddd8d4bf6-k66fp            1/1     Running   0          4m2s
