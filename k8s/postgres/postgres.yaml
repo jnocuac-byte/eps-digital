@@ -11,6 +11,7 @@ data:
     for db in eps_auth eps_user eps_citas eps_catalogo eps_ainlp eps_notifications; do
       psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres -c "CREATE DATABASE $db"
     done
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname eps_ainlp -c "CREATE EXTENSION IF NOT EXISTS vector"
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -78,7 +79,8 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:15-alpine
+          # pgvector/pgvector = PostgreSQL 15 + extension vector (la migracion de ai-nlp usa vector(768)).
+          image: pgvector/pgvector:pg15
           ports:
             - containerPort: 5432
           env:

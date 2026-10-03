@@ -2,7 +2,7 @@
 - [x] FASE 0: gh instalado y autenticado (cuenta pardoski1106, permiso WRITE), rama feat/h16-kubernetes creada desde origin/main
 - [x] FASE 1: endpoints /health y /ready
 - [x] FASE 2: frontend modo gateway + Dockerfile.k8s
-- [x] FASE 3: manifiestos k8s/
+- [x] FASE 3: manifiestos k8s/ (rebase sobre origin/develop hecho; base = develop y PR hacia develop; postgres usa pgvector/pgvector:pg15)
 - [ ] FASE 4 (devcontainer.json y deploy.sh escritos; falta commit/push, Codespace y despliegue): devcontainer, deploy.sh, Codespace, despliegue
 - [ ] FASE 5: evidencias + levantar-demo
 - [ ] FASE 6: README, PR, H16-ENTREGA.md
