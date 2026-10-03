@@ -5,7 +5,7 @@
 - [x] FASE 3: manifiestos k8s/ (rebase sobre origin/develop hecho; base = develop y PR hacia develop; postgres usa pgvector/pgvector:pg15)
 - [ ] FASE 4 (devcontainer.json y deploy.sh escritos; falta commit/push, Codespace y despliegue): devcontainer, deploy.sh, Codespace, despliegue
 - [ ] FASE 5: evidencias + levantar-demo
-- [ ] FASE 6: README, PR, H16-ENTREGA.md
+- [x] FASE 6: README, PR #58 (-> develop) y H16-ENTREGA.md listos
 
 - Codespace creado: eps-h16-77rgx6x5rpgg3wqjr (rama feat/h16-kubernetes, commit 3dae7c9 pusheado)
 - Codespace eps-h16-77rgx6x5rpgg3wqjr FALLO (universal:2 llena el disco de 32GB -> contenedor de recuperacion). Se cambia devcontainer a base:ubuntu-22.04 + docker-in-docker + kubectl-helm-minikube y se recrea el Codespace.
