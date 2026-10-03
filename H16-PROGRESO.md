@@ -8,3 +8,4 @@
 - [ ] FASE 6: README, PR, H16-ENTREGA.md
 
 - Codespace creado: eps-h16-77rgx6x5rpgg3wqjr (rama feat/h16-kubernetes, commit 3dae7c9 pusheado)
+- Codespace eps-h16-77rgx6x5rpgg3wqjr FALLO (universal:2 llena el disco de 32GB -> contenedor de recuperacion). Se cambia devcontainer a base:ubuntu-22.04 + docker-in-docker + kubectl-helm-minikube y se recrea el Codespace.
