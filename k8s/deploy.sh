@@ -71,7 +71,9 @@ kubectl -n $NS rollout restart deployment \
 
 echo "==> [6/7] Esperando pods Ready"
 kubectl -n $NS rollout status statefulset/postgres --timeout=300s
-kubectl -n $NS wait --for=condition=Ready pod --all --timeout=600s
+for d in redis rabbitmq auth-service user-service appointments-service catalog-service ai-nlp-service notifications-service frontend; do
+  kubectl -n $NS rollout status deployment/$d --timeout=600s
+done
 kubectl -n $NS get pods
 
 echo "==> [7/7] Port-forward del Ingress en 8080"
