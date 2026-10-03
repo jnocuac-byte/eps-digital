@@ -13,3 +13,4 @@
 - Codespace vigente: eps-h16-6vrjpqp5r49v35q6x (devcontainer base ubuntu + sshd + dind)
 - FASE 4: deploy.sh lanzado en el Codespace (log: /tmp/deploy.log)
 - Fix: LOG_LEVEL=INFO (loguru) y build frontend desde frontend/. Redesplegando.
+- FASE 4: desplegado OK, todos los pods Ready. URL: https://eps-h16-6vrjpqp5r49v35q6x-8080.app.github.dev
