@@ -1,0 +1,79 @@
+# Punto de entrada unico (sin host: funciona con cualquier URL, p. ej. la de Codespaces).
+#   /                     -> frontend
+#   /api/<servicio>/...   -> microservicio correspondiente (se quita el prefijo /api/<servicio>)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: eps-frontend
+  namespace: eps-digital
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: eps-api
+  namespace: eps-digital
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # El chatbot (IA) puede tardar en responder.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api/auth(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: auth-service
+                port:
+                  number: 8001
+          - path: /api/user(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: user-service
+                port:
+                  number: 8002
+          - path: /api/citas(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: appointments-service
+                port:
+                  number: 8003
+          - path: /api/catalogo(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: catalog-service
+                port:
+                  number: 8004
+          - path: /api/ai(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: ai-nlp-service
+                port:
+                  number: 8005
+          - path: /api/notifications(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: notifications-service
+                port:
+                  number: 8006
