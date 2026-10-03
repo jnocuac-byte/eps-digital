@@ -22,7 +22,8 @@ for svc in auth-service user-service appointments-service catalog-service ai-nlp
   minikube image build -t "eps-digital/$svc:latest" "services/$svc"
 done
 echo "--- frontend"
-minikube image build -t eps-digital/frontend:latest -f frontend/Dockerfile.k8s frontend
+# -f se resuelve relativo al contexto: hay que construir desde frontend/
+(cd frontend && minikube image build -t eps-digital/frontend:latest -f Dockerfile.k8s .)
 
 echo "==> [4/7] Namespace y secreto"
 kubectl apply -f k8s/00-namespace.yaml

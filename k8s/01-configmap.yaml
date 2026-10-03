@@ -13,6 +13,7 @@ data:
   NOTIFICATIONS_SERVICE_URL: "http://notifications-service:8006"
   RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
   RABBITMQ_ENABLED: "true"
-  LOG_LEVEL: "info"
+  # loguru exige el nivel en MAYUSCULAS (con "info" el servicio no arranca).
+  LOG_LEVEL: "INFO"
   # Redis queda aprovisionado como cache para uso futuro; ningun servicio lo consume todavia.
   REDIS_URL: "redis://redis:6379/0"

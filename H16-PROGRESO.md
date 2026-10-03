@@ -10,3 +10,5 @@
 - Codespace creado: eps-h16-77rgx6x5rpgg3wqjr (rama feat/h16-kubernetes, commit 3dae7c9 pusheado)
 - Codespace eps-h16-77rgx6x5rpgg3wqjr FALLO (universal:2 llena el disco de 32GB -> contenedor de recuperacion). Se cambia devcontainer a base:ubuntu-22.04 + docker-in-docker + kubectl-helm-minikube y se recrea el Codespace.
 - Nuevo Codespace: eps-h16-wv9w4p4599w6cg7jg
+- Codespace vigente: eps-h16-6vrjpqp5r49v35q6x (devcontainer base ubuntu + sshd + dind)
+- FASE 4: deploy.sh lanzado en el Codespace (log: /tmp/deploy.log)
