@@ -1,0 +1,15 @@
+{
+  "name": "eps-digital-k8s",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "features": {
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {}
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb"
+  },
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "EPS Digital (Ingress)", "onAutoForward": "notify" }
+  }
+}

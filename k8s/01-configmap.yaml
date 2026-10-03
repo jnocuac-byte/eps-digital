@@ -1,0 +1,18 @@
+# Configuracion no sensible. Las URLs usan el DNS interno de Kubernetes (nombre del Service).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eps-config
+  namespace: eps-digital
+data:
+  AUTH_SERVICE_URL: "http://auth-service:8001"
+  USER_SERVICE_URL: "http://user-service:8002"
+  CITAS_SERVICE_URL: "http://appointments-service:8003"
+  CATALOG_SERVICE_URL: "http://catalog-service:8004"
+  AI_NLP_SERVICE_URL: "http://ai-nlp-service:8005"
+  NOTIFICATIONS_SERVICE_URL: "http://notifications-service:8006"
+  RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+  RABBITMQ_ENABLED: "true"
+  LOG_LEVEL: "info"
+  # Redis queda aprovisionado como cache para uso futuro; ningun servicio lo consume todavia.
+  REDIS_URL: "redis://redis:6379/0"
