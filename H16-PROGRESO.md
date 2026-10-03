@@ -6,3 +6,5 @@
 - [ ] FASE 4 (devcontainer.json y deploy.sh escritos; falta commit/push, Codespace y despliegue): devcontainer, deploy.sh, Codespace, despliegue
 - [ ] FASE 5: evidencias + levantar-demo
 - [ ] FASE 6: README, PR, H16-ENTREGA.md
+
+- Codespace creado: eps-h16-77rgx6x5rpgg3wqjr (rama feat/h16-kubernetes, commit 3dae7c9 pusheado)
