@@ -69,6 +69,29 @@ app = FastAPI(
 
 register_exception_handlers(app)
 
+
+# --- Probes de Kubernetes (H-16) ---
+from fastapi.responses import JSONResponse as _JSONResponse
+from sqlalchemy import text as _sql_text
+
+
+@app.get("/health", tags=["health"])
+def health_check():
+	"""Liveness: el proceso responde. No toca la base de datos."""
+	return {"status": "ok"}
+
+
+@app.get("/ready", tags=["health"])
+def readiness_check():
+	"""Readiness: verifica conectividad con la base de datos (SELECT 1)."""
+	try:
+		with engine.connect() as conn:
+			conn.execute(_sql_text("SELECT 1"))
+	except Exception as exc:
+		log_event("MAIN", "READY", "error", f"Readiness fallido: {exc}")
+		return _JSONResponse(status_code=503, content={"status": "unavailable"})
+	return {"status": "ready"}
+
 origins = [
     "https://eps-digital-cn2h.onrender.com",
     "https://eps-digital-cn2h.onrender.com/",
