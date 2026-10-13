@@ -51,7 +51,7 @@ A continuación, se desglosa el trabajo técnico para las historias seleccionada
 
 ## 2. Acta de Sprint Review (Revisión)
 
-**Fecha de la reunión:** 25/09/2026
+**Fecha de la reunión:** 01/10/2026
 **Asistentes:** Andres Ramos, Santiago Pardo, Juan Nocua
 
 | ID | Historia | ¿Cumplió Definition of Done (DoD)? | Observaciones / Feedback de la Docente |
