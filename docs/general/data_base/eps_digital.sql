@@ -247,3 +247,12 @@ CREATE TABLE public.alembic_version_auth (
   version_num character varying NOT NULL,
   CONSTRAINT alembic_version_auth_pkey PRIMARY KEY (version_num)
 );
+CREATE TABLE public.knowledge_chunks (
+  chunk_id uuid NOT NULL,
+  tipo character varying NOT NULL,
+  nombre character varying,
+  contenido text NOT NULL,
+  embedding USER-DEFINED NOT NULL,
+  creado_en timestamp with time zone NOT NULL,
+  CONSTRAINT knowledge_chunks_pkey PRIMARY KEY (chunk_id)
+);
