@@ -3,7 +3,19 @@ import { useAuthStore } from '../stores/authStore';
 
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-const BASE_URLS = {
+// Modo gateway (Kubernetes): una sola URL de entrada, el Ingress enruta por prefijo /api/<servicio>.
+const isGateway = import.meta.env.VITE_API_MODE === 'gateway';
+
+const GATEWAY_URLS = {
+  auth: '/api/auth',
+  user: '/api/user',
+  citas: '/api/citas',
+  catalogo: '/api/catalogo',
+  ai: '/api/ai',
+  notifications: '/api/notifications',
+};
+
+const DIRECT_URLS = {
   auth: isLocal ? 'http://localhost:8001' : 'https://eps-digital.onrender.com',
   user: isLocal ? 'http://localhost:8002' : 'https://eps-user-service.onrender.com',
   citas: isLocal ? 'http://localhost:8003' : 'https://eps-appointments-service.onrender.com',
@@ -11,6 +23,8 @@ const BASE_URLS = {
   ai: isLocal ? 'http://localhost:8005' : 'https://eps-ainlp-service.onrender.com',
   notifications: isLocal ? 'http://localhost:8006' : 'https://eps-notification-service.onrender.com',
 };
+
+const BASE_URLS = isGateway ? GATEWAY_URLS : DIRECT_URLS;
 
 function createClient(baseURL: string, requiresAuth = false, timeoutMs = 15000) {
   const client = axios.create({
