@@ -19,6 +19,7 @@ from .schemas import NotificacionCreate, NotificacionResponse, MessageResponse
 from .templates import bienvenida
 from .core.logger import setup_logger, log_event
 from .core.error_handler import register_exception_handlers
+from .core.security_headers import register_security_headers
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -103,6 +104,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "X-User-ID"],
 	max_age=600,
 )
+
+# Cabeceras de seguridad HTTP (H-22). Se registra despues del CORS para quedar en
+# el anillo externo y decorar tambien respuestas de error y preflight.
+register_security_headers(app)
 
 
 @app.get("/health")

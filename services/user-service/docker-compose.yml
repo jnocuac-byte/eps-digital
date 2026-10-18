@@ -26,6 +26,8 @@ services:
     environment:
       DATABASE_URL: postgresql://eps_user:eps_password@user-db:5432/eps_user
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      HCE_ENCRYPTION_KEYS: ${HCE_ENCRYPTION_KEYS}
+      HCE_BLIND_INDEX_KEY: ${HCE_BLIND_INDEX_KEY}
     depends_on:
       user-db:
         condition: service_healthy

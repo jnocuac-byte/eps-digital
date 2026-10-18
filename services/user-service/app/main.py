@@ -21,6 +21,8 @@ from app.crud import (
 from app.database import Base, engine, get_db
 from app.core.logger import setup_logger, log_event
 from app.core.error_handler import register_exception_handlers
+from app.core.crypto import validate_crypto_config
+from app.core.security_headers import register_security_headers
 from app.schemas import (
 	AfiliacionCreate,
 	AfiliacionResponse,
@@ -39,6 +41,8 @@ from fastapi.middleware.cors import CORSMiddleware
 async def lifespan(_: FastAPI):
     setup_logger()
     log_event("MAIN", "INIT", "info", "Iniciando User Service...")
+    validate_crypto_config()
+    log_event("MAIN", "INIT", "info", "Configuracion de cifrado HCE validada")
     Base.metadata.create_all(bind=engine)
     log_event("MAIN", "INIT", "info", "Base de datos inicializada")
     log_event("MAIN", "INIT", "info", "User Service listo")
@@ -95,6 +99,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "X-User-ID"],
 	max_age=600,
 )
+
+# Cabeceras de seguridad (H-22). Se registra despues del CORS para quedar en el
+# anillo externo y decorar tambien respuestas de error y preflight.
+register_security_headers(app)
 
 class MessageResponse(BaseModel):
 	"""Respuesta simple para operaciones de confirmacion."""
