@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .core import Orchestrator
 from .core.logger import log_event, setup_logger
 from .core.error_handler import register_exception_handlers
+from .core.security_headers import register_security_headers
 from .core.model_provider import build_fallback_model
 from .core.embeddings import get_gemini_embedding
 from .agents.triage_agent import build_triage_agent
@@ -142,6 +143,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "X-User-ID"],
     max_age=600,
 )
+
+# Cabeceras de seguridad HTTP (H-22). Se registra despues del CORS para quedar en
+# el anillo externo y decorar tambien respuestas de error y preflight.
+register_security_headers(app)
 
 
 def _mapear_historial_a_mensajes_llm(mensajes_db: list[Any]) -> list[dict[str, str]]:

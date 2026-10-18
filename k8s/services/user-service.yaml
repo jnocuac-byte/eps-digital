@@ -42,6 +42,17 @@ spec:
                 secretKeyRef:
                   name: eps-secrets
                   key: JWT_SECRET_KEY
+            # Cifrado HCE (H-22): llaves de cifrado en reposo e indice ciego.
+            - name: HCE_ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: eps-secrets
+                  key: HCE_ENCRYPTION_KEYS
+            - name: HCE_BLIND_INDEX_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: eps-secrets
+                  key: HCE_BLIND_INDEX_KEY
           resources:
             requests:
               cpu: 50m

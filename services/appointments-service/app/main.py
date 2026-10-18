@@ -32,6 +32,7 @@ from app.crud import (
 from app.database import Base, engine, get_db
 from app.core.logger import setup_logger, log_event
 from app.core.error_handler import register_exception_handlers
+from app.core.security_headers import register_security_headers
 from app.schemas import (
 	CancelarCitaRequest,
 	CambioEstadoRequest,
@@ -117,6 +118,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "X-User-ID"],
 	max_age=600,
 )
+
+# Cabeceras de seguridad HTTP (H-22). Se registra despues del CORS para quedar en
+# el anillo externo y decorar tambien respuestas de error y preflight.
+register_security_headers(app)
 
 def _parse_user_id_header(x_user_id: str | None) -> UUID:
 	"""Convierte el header X-User-ID a UUID y valida su presencia."""

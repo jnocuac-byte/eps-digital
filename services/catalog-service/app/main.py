@@ -25,6 +25,7 @@ except ModuleNotFoundError:
 
 from app.core.logger import setup_logger, log_event
 from app.core.error_handler import register_exception_handlers
+from app.core.security_headers import register_security_headers
 
 engine = _database.engine
 get_db = _database.get_db
@@ -110,6 +111,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "X-User-ID"],
 	max_age=600,
 )
+
+# Cabeceras de seguridad HTTP (H-22). Se registra despues del CORS para quedar en
+# el anillo externo y decorar tambien respuestas de error y preflight.
+register_security_headers(app)
 
 # SERVICIOS
 @app.post(

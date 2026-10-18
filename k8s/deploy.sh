@@ -35,6 +35,31 @@ val_or() { # val_or KEY DEFAULT
   local v; v="$(env_val "$1")"; echo "${v:-$2}"
 }
 
+secret_val() { # lee KEY del secret eps-secrets actual (si existe)
+  kubectl -n $NS get secret eps-secrets -o jsonpath="{.data.$1}" 2>/dev/null | base64 -d || true
+}
+
+gen_fernet() { # llave Fernet valida (url-safe base64 de 32 bytes)
+  python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+}
+
+gen_blind() { # secreto para el indice ciego
+  python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+}
+
+# Llaves de cifrado HCE (H-22). Deben ser ESTABLES entre despliegues: si cambian,
+# los datos cifrados dejan de ser legibles. Prioridad: .env -> secret existente -> generar.
+HCE_KEYS="$(val_or HCE_ENCRYPTION_KEYS "$(secret_val HCE_ENCRYPTION_KEYS)")"
+if [ -z "$HCE_KEYS" ]; then
+  HCE_KEYS="$(gen_fernet)"
+  echo "AVISO: HCE_ENCRYPTION_KEYS generada de forma aleatoria; respalda el secret eps-secrets."
+fi
+HCE_BLIND="$(val_or HCE_BLIND_INDEX_KEY "$(secret_val HCE_BLIND_INDEX_KEY)")"
+if [ -z "$HCE_BLIND" ]; then
+  HCE_BLIND="$(gen_blind)"
+  echo "AVISO: HCE_BLIND_INDEX_KEY generada de forma aleatoria; respalda el secret eps-secrets."
+fi
+
 if [ -f .env ]; then
   echo "Creando/actualizando eps-secrets desde .env"
   JWT="$(val_or JWT_SECRET_KEY "$(openssl rand -hex 32)")"
@@ -52,6 +77,8 @@ if [ -n "$JWT" ]; then
   kubectl -n $NS create secret generic eps-secrets \
     --from-literal=JWT_SECRET_KEY="$JWT" \
     --from-literal=POSTGRES_PASSWORD="$PGPASS" \
+    --from-literal=HCE_ENCRYPTION_KEYS="$HCE_KEYS" \
+    --from-literal=HCE_BLIND_INDEX_KEY="$HCE_BLIND" \
     --from-literal=GROQ_API_KEY="$(val_or GROQ_API_KEY placeholder)" \
     --from-literal=CEREBRAS_API_KEY="$(val_or CEREBRAS_API_KEY placeholder)" \
     --from-literal=MISTRAL_API_KEY="$(val_or MISTRAL_API_KEY placeholder)" \

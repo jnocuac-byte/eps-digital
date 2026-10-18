@@ -1,14 +1,30 @@
 # Punto de entrada unico (sin host: funciona con cualquier URL, p. ej. la de Codespaces).
 #   /                     -> frontend
 #   /api/<servicio>/...   -> microservicio correspondiente (se quita el prefijo /api/<servicio>)
+#
+# H-22 (Producción): Descomentar estas líneas y configurar el dominio real para activar TLS con Let's Encrypt
+# (cert-manager + secret "eps-digital-tls"). En local/Codespaces se mantiene el Ingress
+# dinámico (sin host, sin TLS) para no romper el flujo ni las evidencias de H-16.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: eps-frontend
   namespace: eps-digital
+  # H-22 (Producción): Descomentar estas líneas y configurar el dominio real para activar TLS con Let's Encrypt
+  # annotations:
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  #   nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  #   nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
   ingressClassName: nginx
+  # H-22 (Producción): Descomentar este bloque tls y configurar el dominio real para activar TLS con Let's Encrypt
+  # tls:
+  #   - hosts:
+  #       - eps-digital.example.com
+  #     secretName: eps-digital-tls
   rules:
+    # H-22 (Producción): Descomentar esta línea (host) al activar TLS
+    # - host: eps-digital.example.com
     - http:
         paths:
           - path: /
@@ -25,6 +41,10 @@ metadata:
   name: eps-api
   namespace: eps-digital
   annotations:
+    # H-22 (Producción): Descomentar estas líneas y configurar el dominio real para activar TLS con Let's Encrypt
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/use-regex: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$2
     # El chatbot (IA) puede tardar en responder.
@@ -32,7 +52,14 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
 spec:
   ingressClassName: nginx
+  # H-22 (Producción): Descomentar este bloque tls y configurar el dominio real para activar TLS con Let's Encrypt
+  # tls:
+  #   - hosts:
+  #       - eps-digital.example.com
+  #     secretName: eps-digital-tls
   rules:
+    # H-22 (Producción): Descomentar esta línea (host) al activar TLS
+    # - host: eps-digital.example.com
     - http:
         paths:
           - path: /api/auth(/|$)(.*)

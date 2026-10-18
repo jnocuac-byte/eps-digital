@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Afiliacion, InformacionMedica, Usuario
 from app.schemas import AfiliacionCreate, MedicalInfoCreate, UserCreate, UserUpdate
+from app.core.crypto import blind_index
 from app.core.logger import log_event
 
 
@@ -16,8 +17,10 @@ def get_user_by_id(db: Session, usuario_id: UUID) -> Usuario | None:
 
 
 def get_user_by_documento(db: Session, numero_documento: str) -> Usuario | None:
-	"""Obtiene un usuario por numero de documento."""
-	stmt = select(Usuario).where(Usuario.numero_documento == numero_documento)
+	"""Obtiene un usuario por numero de documento (via indice ciego)."""
+	stmt = select(Usuario).where(
+		Usuario.numero_documento_hash == blind_index(numero_documento)
+	)
 	return db.scalar(stmt)
 
 
@@ -26,17 +29,19 @@ def get_user_by_tipo_y_numero_documento(
 	tipo_documento: str,
 	numero_documento: str,
 ) -> Usuario | None:
-	"""Obtiene un usuario por tipo y numero de documento."""
+	"""Obtiene un usuario por tipo y numero de documento (via indice ciego)."""
 	stmt = select(Usuario).where(
 		Usuario.tipo_documento == tipo_documento.strip().upper(),
-		Usuario.numero_documento == numero_documento.strip(),
+		Usuario.numero_documento_hash == blind_index(numero_documento),
 	)
 	return db.scalar(stmt)
 
 
 def get_user_by_correo(db: Session, correo: str) -> Usuario | None:
-	"""Obtiene un usuario por correo electronico."""
-	stmt = select(Usuario).where(Usuario.correo == correo)
+	"""Obtiene un usuario por correo electronico (via indice ciego)."""
+	stmt = select(Usuario).where(
+		Usuario.correo_hash == blind_index(correo, casefold=True)
+	)
 	return db.scalar(stmt)
 
 

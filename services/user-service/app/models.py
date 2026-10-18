@@ -3,10 +3,24 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import UUID, String, Text, Date, TIMESTAMP, Boolean, ForeignKey, text
+from sqlalchemy import (
+	UUID,
+	String,
+	Date,
+	TIMESTAMP,
+	Boolean,
+	ForeignKey,
+	UniqueConstraint,
+	event,
+	text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.crypto import EncryptedString, blind_index
 from app.database import Base
+
+#: Longitud de un indice ciego HMAC-SHA256 en hexadecimal.
+HASH_LEN = 64
 
 
 def utc_now() -> datetime:
@@ -18,6 +32,12 @@ class Usuario(Base):
 	"""Entidad principal de usuario del sistema EPS."""
 
 	__tablename__ = "usuarios"
+
+	# La unicidad de la PII cifrada se garantiza por los indices ciegos.
+	__table_args__ = (
+		UniqueConstraint("numero_documento_hash", name="uq_usuarios_numero_documento_hash"),
+		UniqueConstraint("correo_hash", name="uq_usuarios_correo_hash"),
+	)
 
 	# Identificador unico del usuario (PK).
 	usuario_id: Mapped[uuid.UUID] = mapped_column(
@@ -31,10 +51,17 @@ class Usuario(Base):
 	nombres: Mapped[str] = mapped_column(String(100), nullable=False)
 	apellidos: Mapped[str] = mapped_column(String(100), nullable=False)
 	tipo_documento: Mapped[str] = mapped_column(String(20), nullable=False)
-	numero_documento: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+	# PII cifrada en reposo (H-22). El texto cifrado no es determinista, por eso
+	# la unicidad se delega al indice ciego (numero_documento_hash).
+	numero_documento: Mapped[str] = mapped_column(EncryptedString, nullable=False)
 	fecha_nacimiento: Mapped[datetime] = mapped_column(Date, nullable=False)
 	telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
-	correo: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+	correo: Mapped[str] = mapped_column(EncryptedString, nullable=False)
+
+	# Indices ciegos (HMAC) para busquedas por igualdad y unicidad sobre las
+	# columnas cifradas. Se mantienen automaticamente (ver listeners al final).
+	numero_documento_hash: Mapped[str] = mapped_column(String(HASH_LEN), nullable=False)
+	correo_hash: Mapped[str] = mapped_column(String(HASH_LEN), nullable=False)
 
 	# Trazabilidad de creacion y actualizacion.
 	creado_en: Mapped[datetime] = mapped_column(
@@ -83,11 +110,11 @@ class InformacionMedica(Base):
 		unique=True,
 	)
 
-	# Datos medicos relevantes para la prestacion del servicio.
-	tipo_sangre: Mapped[str | None] = mapped_column(String(5), nullable=True)
-	alergias: Mapped[str | None] = mapped_column(Text, nullable=True)
-	enfermedades_cronicas: Mapped[str | None] = mapped_column(Text, nullable=True)
-	medicamentos_actuales: Mapped[str | None] = mapped_column(Text, nullable=True)
+	# Datos medicos relevantes para la prestacion del servicio (HCE cifrada H-22).
+	tipo_sangre: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+	alergias: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+	enfermedades_cronicas: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+	medicamentos_actuales: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
 	actualizado_en: Mapped[datetime] = mapped_column(
 		TIMESTAMP,
 		nullable=False,
@@ -145,3 +172,20 @@ class Afiliacion(Base):
 
 	# Navegacion inversa hacia la entidad Usuario.
 	usuario: Mapped[Usuario] = relationship(back_populates="afiliacion")
+
+
+def _calcular_hashes(target: Usuario) -> None:
+	"""Recalcula los indices ciegos a partir de los valores en claro del usuario."""
+	target.numero_documento_hash = blind_index(target.numero_documento)
+	target.correo_hash = blind_index(target.correo, casefold=True)
+
+
+@event.listens_for(Usuario, "before_insert")
+@event.listens_for(Usuario, "before_update")
+def _mantener_hashes(mapper, connection, target: Usuario) -> None:  # noqa: ARG001
+	"""Mantiene sincronizados los indices ciegos al insertar/actualizar usuarios.
+
+	Permite que ``crud.py`` siga usando ``setattr``/``model_dump`` sin conocer los
+	indices ciegos: el hash se calcula aqui, en el flush, a partir del texto plano.
+	"""
+	_calcular_hashes(target)
