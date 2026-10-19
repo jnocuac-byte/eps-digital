@@ -1,44 +1,72 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* ── Typography ── */
   --font-size: 16px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+
+  /* ── Brand: Navy Anchor ── */
+  --primary: #2B3E59;
+  --primary-deep: #1e2d40;
+  --primary-light: #3a527a;
+  --primary-foreground: #ffffff;
+
+  /* ── Surface ── */
   --background: #ffffff;
-  --foreground: oklch(0.145 0 0);
+  --foreground: #1a1a1a;
+  --page-background: #F5F5F5;
+
+  /* ── Cards & Popovers ── */
   --card: #ffffff;
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #030213;
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.0058 264.53);
-  --secondary-foreground: #030213;
+  --card-foreground: #1a1a1a;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1a;
+
+  /* ── Secondary & Muted ── */
+  --secondary: #f0f1f5;
+  --secondary-foreground: #1a1a1a;
   --muted: #ececf0;
   --muted-foreground: #717182;
+
+  /* ── Accent ── */
   --accent: #e9ebef;
-  --accent-foreground: #030213;
+  --accent-foreground: #1a1a1a;
+
+  /* ── Semantic ── */
   --destructive: #d4183d;
   --destructive-foreground: #ffffff;
+  --success: #16a34a;
+  --success-light: #dcfce7;
+  --warning: #d97706;
+  --warning-light: #fef3c7;
+
+  /* ── Borders & Inputs ── */
   --border: rgba(0, 0, 0, 0.1);
   --input: transparent;
   --input-background: #f3f3f5;
   --switch-background: #cbced4;
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  --ring: #2B3E59;
+
+  /* ── Radius ── */
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #030213;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  /* ── Charts ── */
+  --chart-1: #c26b5a;
+  --chart-2: #5a9e93;
+  --chart-3: #3d6480;
+  --chart-4: #d4b060;
+  --chart-5: #c49240;
+
+  /* ── Sidebar ── */
+  --sidebar: #2B3E59;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #2B3E59;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1e2d40;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.12);
+  --sidebar-ring: #3a527a;
 }
 
 .dark {
@@ -60,7 +88,7 @@
   --destructive-foreground: oklch(0.637 0.237 25.331);
   --border: oklch(0.269 0 0);
   --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
+  --ring: oklch(0.488 0.243 264.376);
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --chart-1: oklch(0.488 0.243 264.376);
@@ -95,6 +123,13 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-light: var(--success-light);
+  --color-warning: var(--warning);
+  --color-warning-light: var(--warning-light);
+  --color-primary-deep: var(--primary-deep);
+  --color-primary-light: var(--primary-light);
+  --color-page-background: var(--page-background);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-input-background: var(--input-background);
@@ -117,6 +152,8 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans: 'Inter', 'Roboto', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Roboto', ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -126,56 +163,102 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-body);
   }
 
-  /**
-  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
-  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
-  */
+  /* ── Display: Inter for headings, commanding and authoritative ── */
+  h1, h2, h3, h4, h5, h6,
+  .font-inter {
+    font-family: var(--font-sans);
+  }
 
+  /* ── Fixed rem scale (Operate mode: no fluid headings) ── */
   html {
     font-size: var(--font-size);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   h1 {
-    font-size: var(--text-2xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
   }
 
   h2 {
-    font-size: var(--text-xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
   }
 
   h3 {
-    font-size: var(--text-lg);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: normal;
   }
 
   h4 {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
+    font-size: 1.0625rem;
+    font-weight: 600;
     line-height: 1.5;
+    letter-spacing: normal;
   }
 
   label {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
+    font-size: 0.875rem;
+    font-weight: 500;
     line-height: 1.5;
+    letter-spacing: normal;
   }
 
   button {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
+    font-size: 0.875rem;
+    font-weight: 500;
     line-height: 1.5;
+    letter-spacing: normal;
   }
 
-  input {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-normal);
+  input, textarea, select {
+    font-size: 1rem;
+    font-weight: 400;
     line-height: 1.5;
+    letter-spacing: normal;
+  }
+
+  /* ── Focus ring: navy for consistency ── */
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+
+  /* ── Text selection: navy tinted ── */
+  ::selection {
+    background-color: #2B3E5933;
+    color: var(--foreground);
+  }
+
+  /* ── Scrollbar: subtle, palette-aligned ── */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--muted);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--primary-light);
+    border-radius: 4px;
+    border: 2px solid var(--muted);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
   }
 }

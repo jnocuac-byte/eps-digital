@@ -1,0 +1,130 @@
+# PostgreSQL unico (una instancia, 6 bases logicas) con almacenamiento persistente explicito.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: eps-digital
+data:
+  01-crear-bases.sh: |
+    #!/bin/sh
+    set -e
+    for db in eps_auth eps_user eps_citas eps_catalogo eps_ainlp eps_notifications; do
+      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres -c "CREATE DATABASE $db"
+    done
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname eps_ainlp -c "CREATE EXTENSION IF NOT EXISTS vector"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: eps-postgres-pv
+  labels:
+    app: postgres
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath:
+    path: /data/eps-postgres
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: eps-postgres-pvc
+  namespace: eps-digital
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: manual
+  volumeName: eps-postgres-pv
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: eps-digital
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: eps-digital
+  labels:
+    app: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          # pgvector/pgvector = PostgreSQL 15 + extension vector (la migracion de ai-nlp usa vector(768)).
+          image: pgvector/pgvector:pg15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: eps_user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: eps-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: postgres
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U eps_user -d postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U eps_user -d postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 6
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: eps-postgres-pvc
+        - name: init
+          configMap:
+            name: postgres-init

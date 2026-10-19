@@ -256,3 +256,6 @@ Desktop.ini
 
 .agents/*
 *:Zone.Identifier
+# H-16 Kubernetes: secretos reales nunca se versionan
+k8s/secret.yaml
+.env

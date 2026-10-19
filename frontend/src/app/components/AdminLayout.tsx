@@ -43,7 +43,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.to}
                 to={item.to}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                   isActive
                     ? 'bg-white/20 text-white'
                     : 'text-white/70 hover:bg-white/10 hover:text-white'
@@ -58,7 +58,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
           {esSuperAdmin && (
             <Link
               to="/admin/admins"
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                 location.pathname === '/admin/admins'
                   ? 'bg-white/20 text-white'
                   : 'text-white/70 hover:bg-white/10 hover:text-white'
@@ -74,7 +74,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         <div className="px-3 py-4 border-t border-white/10">
           <button
             onClick={logout}
-            className="flex items-center gap-3 px-3 py-2.5 w-full rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+            className="flex items-center gap-3 px-3 py-2.5 w-full rounded-md text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors"
           >
             <LogOut size={18} />
             Cerrar Sesión

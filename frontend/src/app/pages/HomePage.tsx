@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useLocation } from 'react-router';
 import { Calendar, Bot, MapPin, ArrowRight, MessageCircle, Clock } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useQuery } from '@tanstack/react-query';
@@ -30,6 +30,7 @@ const benefits = [
 export default function HomePage() {
   const { isAuthenticated, user, userId, rol } = useAuthStore();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   useEffect(() => {
     if (isAuthenticated && rol === 'medico') {
@@ -115,7 +116,7 @@ export default function HomePage() {
             />
           </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 via-blue-400 to-purple-500" />
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-[#2B3E59]" />
       </section>
 
       {/* Próxima Cita (si autenticado) */}
@@ -139,7 +140,7 @@ export default function HomePage() {
                 </div>
                 <Link
                   to="/citas/ver"
-                  className="bg-[#2B3E59] text-white px-5 py-2 rounded-lg text-sm hover:bg-[#1e2d40] transition-colors"
+                  className="bg-[#2B3E59] text-white px-5 py-2 rounded-full text-sm hover:bg-[#1e2d40] transition-colors"
                 >
                   Ver detalles
                 </Link>
@@ -151,7 +152,7 @@ export default function HomePage() {
                 </p>
                 <Link
                   to="/citas/agendar"
-                  className="bg-[#2B3E59] text-white px-5 py-2 rounded-lg text-sm hover:bg-[#1e2d40] transition-colors whitespace-nowrap"
+                  className="bg-[#2B3E59] text-white px-5 py-2 rounded-full text-sm hover:bg-[#1e2d40] transition-colors whitespace-nowrap"
                 >
                   Agendar ahora
                 </Link>
@@ -200,14 +201,16 @@ export default function HomePage() {
       </section>
 
       {/* Floating Chat Button */}
-      <Link
-        to="/asistente"
-        className="fixed bottom-6 right-6 bg-[#2B3E59] text-white p-4 rounded-full shadow-lg hover:bg-[#1e2d40] transition-colors z-40 flex items-center gap-2"
-        title="Asistente Virtual"
-      >
-        <Bot size={22} />
-        <span className="hidden sm:block text-sm font-medium">EPSIA</span>
-      </Link>
+      {pathname !== '/' && (
+        <Link
+          to="/asistente"
+          className="fixed bottom-6 right-6 bg-[#2B3E59] text-white p-4 rounded-full shadow-lg hover:bg-[#1e2d40] transition-colors z-40 flex items-center gap-2"
+          title="Asistente Virtual"
+        >
+          <Bot size={22} />
+          <span className="hidden sm:block text-sm font-medium">EPSIA</span>
+        </Link>
+      )}
     </div>
   );
 }

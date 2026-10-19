@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-19T00:00:00Z",
+  "title": "Design System: EPS Digital",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Clinical Navy",
+        "canonical": "#2B3E59",
+        "tonalRamp": ["#0f1a26", "#1a2d45", "#2B3E59", "#3a527a", "#5a7499", "#8da3bd", "#c0cdd9", "#e8edf2"]
+      },
+      "primary-deep": {
+        "role": "primary",
+        "displayName": "Navy Deep",
+        "canonical": "#1e2d40"
+      },
+      "primary-light": {
+        "role": "primary",
+        "displayName": "Navy Light",
+        "canonical": "#3a527a"
+      },
+      "page-background": {
+        "role": "neutral",
+        "displayName": "Page Tint",
+        "canonical": "#F5F5F5"
+      },
+      "input-background": {
+        "role": "neutral",
+        "displayName": "Input Canvas",
+        "canonical": "#f3f3f5"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Soft Gray",
+        "canonical": "#ececf0"
+      },
+      "muted-foreground": {
+        "role": "neutral",
+        "displayName": "Medium Gray",
+        "canonical": "#717182"
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Near-Black",
+        "canonical": "#1a1a1a"
+      },
+      "destructive": {
+        "role": "destructive",
+        "displayName": "Destructive Red",
+        "canonical": "#d4183d"
+      },
+      "success": {
+        "role": "success",
+        "displayName": "Success Green",
+        "canonical": "#16a34a"
+      },
+      "warning": {
+        "role": "warning",
+        "displayName": "Warning Amber",
+        "canonical": "#d97706"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Hero headlines on landing and dashboard pages. Bold and commanding, never decorative."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section titles, page headers. The workhorse heading size."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card titles, sidebar section labels, modal headers. Compact authority."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "All running text, descriptions, form labels. Standard comfortable reading measure."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Form field labels, navigation items, button text. Slightly heavier than body for interactive clarity."
+      },
+      "small": {
+        "displayName": "Small",
+        "purpose": "Captions, timestamps, secondary metadata, badges."
+      }
+    },
+    "shadows": [
+      { "name": "card-ambient", "value": "0 1px 2px rgba(0,0,0,0.05)", "purpose": "Subtle lift for content cards at rest." },
+      { "name": "card-hover", "value": "0 4px 6px rgba(0,0,0,0.07)", "purpose": "Slightly deeper lift on interactive card hover." },
+      { "name": "modal", "value": "0 25px 50px rgba(0,0,0,0.25)", "purpose": "Heavy lift for dialogs and floating panels." },
+      { "name": "dropdown", "value": "0 10px 25px rgba(0,0,0,0.15)", "purpose": "Navigation dropdowns and popover menus." },
+      { "name": "navbar", "value": "0 2px 8px rgba(0,0,0,0.08)", "purpose": "Fixed navigation bar separation from page content." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Default easing for state transitions." },
+      { "name": "ease-out", "value": "cubic-bezier(0, 0, 0.2, 1)", "purpose": "Entrance animations and hover responses." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" },
+      { "name": "2xl", "value": "1536px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The main CTA button. Navy pill shape, white text, prominent on every key surface.",
+      "html": "<button class=\"ds-btn-primary\">Agendar Cita</button>",
+      "css": ".ds-btn-primary { background: #2B3E59; color: #ffffff; padding: 12px 32px; border-radius: 9999px; font-family: 'Roboto', sans-serif; font-size: 0.875rem; font-weight: 500; border: none; cursor: pointer; transition: background 0.2s; display: inline-flex; align-items: center; gap: 8px; } .ds-btn-primary:hover { background: #1e2d40; } .ds-btn-primary:focus-visible { outline: 2px solid #2B3E59; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary action button. Transparent with navy border, inverts on hover.",
+      "html": "<button class=\"ds-btn-outline\">Conoce más</button>",
+      "css": ".ds-btn-outline { background: transparent; color: #2B3E59; padding: 12px 32px; border-radius: 9999px; font-family: 'Roboto', sans-serif; font-size: 0.875rem; font-weight: 500; border: 2px solid #2B3E59; cursor: pointer; transition: background 0.2s, color 0.2s; display: inline-flex; align-items: center; gap: 8px; } .ds-btn-outline:hover { background: #2B3E59; color: #ffffff; } .ds-btn-outline:focus-visible { outline: 2px solid #2B3E59; outline-offset: 2px; }"
+    },
+    {
+      "name": "Content Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The primary content vessel. White, rounded-xl, softly shadowed.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-header\"><h3 class=\"ds-card-title\">Título</h3></div><div class=\"ds-card-body\"><p>Contenido de ejemplo dentro de una tarjeta.</p></div></div>",
+      "css": ".ds-card { background: #ffffff; border-radius: 1rem; border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 1px 2px rgba(0,0,0,0.05); padding: 24px; transition: box-shadow 0.2s; } .ds-card:hover { box-shadow: 0 4px 6px rgba(0,0,0,0.07); } .ds-card-header { margin-bottom: 16px; } .ds-card-title { font-family: 'Inter', sans-serif; font-size: 1.25rem; font-weight: 600; color: #2B3E59; line-height: 1.4; } .ds-card-body { font-family: 'Roboto', sans-serif; font-size: 1rem; color: #1a1a1a; line-height: 1.5; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Standard form field. Gray background, rounded-md, navy focus ring.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Escribe aquí...\" />",
+      "css": ".ds-input { background: #f3f3f5; color: #1a1a1a; border: 1px solid rgba(0,0,0,0.1); border-radius: 0.5rem; padding: 10px 12px; font-family: 'Roboto', sans-serif; font-size: 0.875rem; height: 36px; width: 100%; transition: border-color 0.2s, box-shadow 0.2s; outline: none; } .ds-input::placeholder { color: #717182; } .ds-input:focus { border-color: #2B3E59; box-shadow: 0 0 0 3px rgba(43,62,89,0.15); } .ds-input:disabled { background: #f3f3f5; color: #9ca3af; cursor: not-allowed; }"
+    },
+    {
+      "name": "Navbar",
+      "kind": "nav",
+      "refersTo": "sidebar-nav",
+      "description": "Fixed top navigation bar. Navy background, white text, logo left, links center, auth right.",
+      "html": "<nav class=\"ds-navbar\"><div class=\"ds-navbar-inner\"><a class=\"ds-navbar-logo\" href=\"/\">EPS Digital</a><div class=\"ds-navbar-links\"><a href=\"/\">Inicio</a><a href=\"/servicios\">Servicios</a></div><div class=\"ds-navbar-actions\"><button class=\"ds-btn-outline-light\">Iniciar Sesión</button></div></div></nav>",
+      "css": ".ds-navbar { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #2B3E59; height: 64px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); } .ds-navbar-inner { max-width: 1440px; margin: 0 auto; padding: 0 24px; height: 100%; display: flex; align-items: center; justify-content: space-between; } .ds-navbar-logo { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 1.125rem; color: #ffffff; text-decoration: none; } .ds-navbar-links { display: flex; gap: 24px; } .ds-navbar-links a { color: #ffffff; text-decoration: none; font-family: 'Roboto', sans-serif; font-size: 0.875rem; font-weight: 500; opacity: 0.9; transition: opacity 0.2s; } .ds-navbar-links a:hover { opacity: 1; } .ds-navbar-actions { display: flex; gap: 12px; } .ds-btn-outline-light { background: transparent; color: #ffffff; border: 1px solid rgba(255,255,255,0.5); border-radius: 9999px; padding: 6px 16px; font-size: 0.875rem; cursor: pointer; transition: background 0.2s, color 0.2s; } .ds-btn-outline-light:hover { background: #ffffff; color: #2B3E59; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Status indicator pill. Green for available, red for unavailable.",
+      "html": "<span class=\"ds-badge ds-badge-success\">● Disponible</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; font-family: 'Roboto', sans-serif; font-size: 0.75rem; font-weight: 600; padding: 4px 12px; white-space: nowrap; } .ds-badge-success { background: #dcfce7; color: #15803d; } .ds-badge-destructive { background: #fee2e2; color: #dc2626; }"
+    },
+    {
+      "name": "Metric Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Dashboard metric tile. Icon in tinted circle, label, and large value.",
+      "html": "<div class=\"ds-metric-card\"><div class=\"ds-metric-icon\" style=\"background: rgba(43,62,89,0.08); color: #2B3E59;\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"18\" rx=\"2\" ry=\"2\"/><line x1=\"16\" y1=\"2\" x2=\"16\" y2=\"6\"/><line x1=\"8\" y1=\"2\" x2=\"8\" y2=\"6\"/><line x1=\"3\" y1=\"10\" x2=\"21\" y2=\"10\"/></svg></div><div class=\"ds-metric-text\"><p class=\"ds-metric-label\">Citas hoy</p><p class=\"ds-metric-value\">12</p></div></div>",
+      "css": ".ds-metric-card { background: #ffffff; border-radius: 1rem; border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 1px 2px rgba(0,0,0,0.05); padding: 24px; display: flex; align-items: center; gap: 16px; } .ds-metric-icon { border-radius: 0.75rem; padding: 12px; display: flex; align-items: center; justify-content: center; } .ds-metric-label { font-family: 'Roboto', sans-serif; font-size: 0.875rem; color: #717182; margin: 0; } .ds-metric-value { font-family: 'Inter', sans-serif; font-size: 1.5rem; font-weight: 600; color: #1f2937; margin: 0; line-height: 1.3; }"
+    },
+    {
+      "name": "Chat Message Bubble",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "AI chat message. Navy for user, gray for assistant, with avatar circles.",
+      "html": "<div class=\"ds-chat-bubble ds-chat-user\">Hola, necesito agendar una cita</div>",
+      "css": ".ds-chat-bubble { max-width: 75%; padding: 10px 16px; border-radius: 1rem; font-family: 'Roboto', sans-serif; font-size: 0.875rem; line-height: 1.5; } .ds-chat-user { background: #2B3E59; color: #ffffff; border-bottom-right-radius: 0.25rem; margin-left: auto; } .ds-chat-assistant { background: #f3f4f6; color: #1f2937; border-bottom-left-radius: 0.25rem; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Calm Clinical Corridor",
+    "overview": "EPS Digital's visual language is a study in restrained confidence. The system speaks with the authority of a trusted healthcare provider — calm, clear, and unwavering — while avoiding the cold sterility that plagues medical software. Every surface earns its place through utility, not decoration. The deep navy (#2B3E59) anchors the entire experience like the sturdy frame of a clinic door: always visible, never ornamental.\n\nThe palette is deliberately limited. A single strong primary carries the brand weight across navbars, buttons, and section headers, while a carefully graded neutral scale handles the rest. White backgrounds keep the airiness that patients need when navigating health concerns. Color appears with purpose — green for availability, red for errors, blue-200 for emphasis in hero text — never as filler.\n\nLayout is generous and uncluttered. The 1440px max-width container, 24px padding, and 24px grid gaps create breathing room that respects the user's attention. Cards are the primary content vessel: rounded-xl, softly shadowed, always on white. The system favors full-width CTAs and hero sections that let the brand gradient speak.",
+    "keyCharacteristics": [
+      "Navy-anchored calm: the primary #2B3E59 appears on every key surface, creating instant recognition",
+      "White-dominant backgrounds with soft #F5F5F5 page tint for depth contrast",
+      "Generous whitespace: 24px internal padding, 16-24px gaps, max-width 1440px container",
+      "Rounded-full CTAs as the signature interactive pattern (pill-shaped buttons)",
+      "Inter headings for authority, Roboto body for readability",
+      "Minimal shadow vocabulary: ambient lifts only, never structural blocks",
+      "Healthcare-appropriate restraint: no gradients on text, no glass effects, no decorative flourishes"
+    ],
+    "rules": [
+      { "name": "The Navy Anchor Rule", "body": "The primary navy (#2B3E59) appears on every key interactive surface — navbar, sidebar, primary buttons, section headings. Its omnipresence is the brand signature.", "section": "colors" },
+      { "name": "The White Space Doctrine", "body": "Backgrounds are white or page-tint (#F5F5F5). No card, section, or content area uses a saturated or tinted background unless it is a branded gradient banner.", "section": "colors" },
+      { "name": "The Heading Weight Rule", "body": "Headings use Inter at 600-700 weight. Body text and labels use Roboto at 400-500. Never mix.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat at rest. Shadows appear only to signal interactivity (hover) or layering (modal, dropdown).", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use navy (#2B3E59) as the primary accent on every key interactive surface",
+      "Do keep backgrounds white or page-tint (#F5F5F5)",
+      "Do use rounded-full (pill) shapes for primary and secondary CTA buttons",
+      "Do pair Inter for headings with Roboto for body",
+      "Do use 24px internal padding and 24px grid gaps as the standard spacing rhythm",
+      "Do keep shadows minimal — ambient lifts for cards at rest, slightly deeper on hover",
+      "Do use the navy gradient (135deg, #2B3E59 → #3a527a) for hero sections and CTA banners"
+    ],
+    "donts": [
+      "Don't use saturated or tinted backgrounds for content cards",
+      "Don't add gradient text, glass effects, or decorative blur",
+      "Don't use hard-offset shadows (box-shadow: 4px 4px 0) or block shadows",
+      "Don't put section numbers or eyebrow kickers above headings",
+      "Don't use rounded-xl on buttons or rounded-full on cards",
+      "Don't apply color to text labels or secondary copy for decoration",
+      "Don't use modals for tasks that don't require interruption or protected focus"
+    ]
+  }
+}

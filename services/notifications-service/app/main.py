@@ -19,6 +19,7 @@ from .schemas import NotificacionCreate, NotificacionResponse, MessageResponse
 from .templates import bienvenida
 from .core.logger import setup_logger, log_event
 from .core.error_handler import register_exception_handlers
+from .core.security_headers import register_security_headers
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -68,6 +69,23 @@ app = FastAPI(title="Notifications Service", version="1.0.0", lifespan=lifespan)
 
 register_exception_handlers(app)
 
+
+# --- Probes de Kubernetes (H-16) ---
+from fastapi.responses import JSONResponse as _JSONResponse
+from sqlalchemy import text as _sql_text
+
+
+@app.get("/ready", tags=["health"])
+def readiness_check():
+	"""Readiness: verifica conectividad con la base de datos (SELECT 1)."""
+	try:
+		with engine.connect() as conn:
+			conn.execute(_sql_text("SELECT 1"))
+	except Exception as exc:
+		log_event("MAIN", "READY", "error", f"Readiness fallido: {exc}")
+		return _JSONResponse(status_code=503, content={"status": "unavailable"})
+	return {"status": "ready"}
+
 origins = [
     "https://eps-digital-cn2h.onrender.com",
     "https://eps-digital-cn2h.onrender.com/",
@@ -86,6 +104,10 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "X-User-ID"],
 	max_age=600,
 )
+
+# Cabeceras de seguridad HTTP (H-22). Se registra despues del CORS para quedar en
+# el anillo externo y decorar tambien respuestas de error y preflight.
+register_security_headers(app)
 
 
 @app.get("/health")
