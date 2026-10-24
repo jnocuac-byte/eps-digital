@@ -20,13 +20,13 @@ function MetricCard({ label, value, icon, color = PRIMARY }: {
   label: string; value: number; icon: React.ReactNode; color?: string;
 }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex items-center gap-4">
-      <div className="rounded-xl p-3" style={{ backgroundColor: `${color}18` }}>
+    <div className="metric-card bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-md">
+      <div className="rounded-2xl p-3.5" style={{ backgroundColor: `${color}18` }}>
         <div style={{ color }}>{icon}</div>
       </div>
       <div>
         <p className="text-gray-500 text-sm">{label}</p>
-        <p className="text-2xl font-semibold text-gray-800">{value}</p>
+        <p key={value} className="metric-value text-3xl font-semibold tracking-tight text-gray-800">{value}</p>
       </div>
     </div>
   );
@@ -77,10 +77,10 @@ export default function MedicoDashboardPage() {
   }
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8">
+    <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8 lg:py-10">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-[#2B3E59]">Mi Panel Médico</h1>
-        <p className="text-gray-500 text-sm mt-1">{new Date().toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-[#2B3E59]">Mi Panel Médico</h1>
+        <p className="text-gray-500 text-sm mt-2 capitalize">{new Date().toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
@@ -90,54 +90,70 @@ export default function MedicoDashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-base font-semibold text-[#2B3E59] mb-4">Citas de hoy ({citasHoy.length})</h2>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 transition-[box-shadow,transform] duration-200 hover:shadow-md">
+          <div className="flex items-center justify-between gap-3 mb-5">
+            <h2 className="text-base font-semibold text-[#2B3E59]">Citas de hoy</h2>
+            <span className="bg-secondary text-secondary-foreground rounded-full px-2.5 py-1 text-xs font-semibold">{citasHoy.length}</span>
+          </div>
           {citasHoy.length > 0 ? (
             <ul className="space-y-3">
               {citasHoy.map((c) => (
-                <li key={c.cita_id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                <li key={c.cita_id} className="flex items-center justify-between gap-4 py-3 border-b border-gray-50 last:border-0">
                   <div>
                     <p className="text-sm font-medium text-gray-800">
                       {c.especialidad_nombre ?? c.tipo_servicio}
                     </p>
                     <p className="text-xs text-gray-500">{c.hora_inicio} · {c.sede_nombre ?? 'Sin sede'}</p>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${estadoColor[c.estado]}`}>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${estadoColor[c.estado]}`}>
                     {c.estado.replace('_', ' ')}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-gray-400 gap-2">
-              <AlertTriangle size={28} className="opacity-40" />
-              <p className="text-sm">Sin citas programadas para hoy</p>
+            <div className="empty-state flex flex-col items-center justify-center py-10 px-5 text-center text-gray-500 gap-3 rounded-xl bg-gray-50/70">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary text-primary">
+                <Calendar size={30} strokeWidth={1.8} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-700">Tu agenda está despejada</p>
+                <p className="mt-1 max-w-xs text-sm text-gray-500">No tienes citas programadas para hoy.</p>
+              </div>
             </div>
           )}
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-base font-semibold text-[#2B3E59] mb-4">Próximas citas · 7 días ({proximas.length})</h2>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 transition-[box-shadow,transform] duration-200 hover:shadow-md">
+          <div className="flex items-center justify-between gap-3 mb-5">
+            <h2 className="text-base font-semibold text-[#2B3E59]">Próximas citas · 7 días</h2>
+            <span className="bg-secondary text-secondary-foreground rounded-full px-2.5 py-1 text-xs font-semibold">{proximas.length}</span>
+          </div>
           {proximas.length > 0 ? (
             <ul className="space-y-3">
               {proximas.slice(0, 8).map((c) => (
-                <li key={c.cita_id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                <li key={c.cita_id} className="flex items-center justify-between gap-4 py-3 border-b border-gray-50 last:border-0">
                   <div>
                     <p className="text-sm font-medium text-gray-800">
                       {c.especialidad_nombre ?? c.tipo_servicio}
                     </p>
                     <p className="text-xs text-gray-500">{c.fecha_cita} · {c.hora_inicio}</p>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${estadoColor[c.estado]}`}>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${estadoColor[c.estado]}`}>
                     {c.estado.replace('_', ' ')}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-gray-400 gap-2">
-              <Clock size={28} className="opacity-40" />
-              <p className="text-sm">Sin citas próximas</p>
+            <div className="empty-state flex flex-col items-center justify-center py-10 px-5 text-center text-gray-500 gap-3 rounded-xl bg-gray-50/70">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#fff4df] text-[#9a6410]">
+                <Clock size={30} strokeWidth={1.8} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-700">Todo en calma por ahora</p>
+                <p className="mt-1 max-w-xs text-sm text-gray-500">No hay citas próximas en los siguientes 7 días.</p>
+              </div>
             </div>
           )}
         </div>

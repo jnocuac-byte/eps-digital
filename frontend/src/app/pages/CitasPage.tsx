@@ -19,10 +19,10 @@ export default function CitasPage() {
               key={tab.to}
               to={tab.to}
               className={({ isActive }) =>
-                `flex items-center gap-2 px-5 py-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors
+                `flex items-center gap-2 px-5 py-4 text-sm font-medium border-b-2 whitespace-nowrap transition-[background-color,color,border-color,transform] duration-200
                 ${isActive
                   ? 'border-[#2B3E59] text-[#2B3E59] bg-blue-50/50'
-                  : 'border-transparent text-gray-500 hover:text-[#2B3E59] hover:bg-gray-50'}`
+                  : 'border-transparent text-gray-500 hover:text-[#2B3E59] hover:bg-gray-50 hover:-translate-y-0.5'}`
               }
             >
               {tab.icon}

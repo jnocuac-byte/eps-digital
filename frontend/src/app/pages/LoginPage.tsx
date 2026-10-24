@@ -73,11 +73,11 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F5F5] flex items-center justify-center px-4 py-12">
-      <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-md">
+    <div className="min-h-screen bg-page-background flex items-center justify-center px-4 py-12">
+      <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-8 md:p-10 w-full max-w-md">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="bg-[#2B3E59] rounded-full p-3 mb-3">
+          <div className="bg-[#2B3E59] rounded-2xl p-3 mb-3 shadow-sm">
             <HeartPulse size={28} color="white" />
           </div>
           <h1 className="font-inter text-2xl font-bold text-[#2B3E59]">EPS Digital</h1>
@@ -99,7 +99,7 @@ export default function LoginPage() {
             </label>
             <select
               {...register('tipo_documento', { required: 'Selecciona el tipo de documento' })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#466b79]/30 focus:border-[#466b79] transition-colors"
             >
               {TIPO_DOC_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -122,7 +122,7 @@ export default function LoginPage() {
               })}
               type="text"
               placeholder="Ej: 1234567890"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#466b79]/30 focus:border-[#466b79] transition-colors"
             />
             {errors.numero_documento && (
               <p className="text-red-500 text-xs mt-1">{errors.numero_documento.message}</p>
@@ -140,7 +140,7 @@ export default function LoginPage() {
                 })}
                 type={showPass ? 'text' : 'password'}
                 placeholder="••••••••"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 focus:border-[#2B3E59] pr-10"
+                className="w-full border border-gray-300 rounded-lg px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#466b79]/30 focus:border-[#466b79] pr-10 transition-colors"
               />
               <button
                 type="button"
@@ -164,7 +164,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#2B3E59] text-white font-semibold py-3 rounded-lg hover:bg-[#1e2d40] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full bg-[#2B3E59] text-white font-semibold py-3.5 rounded-xl hover:bg-[#1e2d40] hover:-translate-y-0.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">
