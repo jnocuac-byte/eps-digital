@@ -111,6 +111,7 @@ class KnowledgeChunk(Base):
 	)
 	tipo: Mapped[str] = mapped_column(String(50), nullable=False)
 	nombre: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+	source_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
 	contenido: Mapped[str] = mapped_column(Text, nullable=False)
 	embedding: Mapped[list[float]] = mapped_column(Vector(768), nullable=False)
 	creado_en: Mapped[datetime] = mapped_column(

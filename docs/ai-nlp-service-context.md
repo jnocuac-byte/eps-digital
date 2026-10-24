@@ -94,6 +94,22 @@ modifican el system prompt global ni el estado persistido de la conversación.
 Si falla Gemini, la consulta vectorial o la configuración RAG, el chat continúa
 con la guía estática de triaje y se registra un warning.
 
+### Catálogo enriquecido e ingesta
+
+La tabla `knowledge_chunks` contiene los 12 fragmentos de la guía general y
+un catálogo curado de 30 motivos de consulta de atención primaria en
+`app/knowledge/data/primary_care_catalog.py`, distribuido entre Cardiología,
+Neurología, Pediatría, Dermatología, Odontología, Ginecología, Medicina
+General, Oftalmología, Ortopedia y Traumatología, y Gastroenterología.
+
+Cada fila tiene un `source_key` único para permitir upsert idempotente. La
+migración Alembic agrega esta columna y conserva las filas existentes. La
+ingesta se ejecuta explícitamente con
+`python scripts/ingest_knowledge.py`; por defecto no borra datos, valida
+embeddings de 768 dimensiones y aplica una pausa configurable entre llamadas
+a Gemini. `--replace` es el modo explícito para eliminar filas fuera del
+dataset actual; `--dry-run` no toca ni Gemini ni la base de datos.
+
 ### Modelos de salida del Triage
 
 ```python
