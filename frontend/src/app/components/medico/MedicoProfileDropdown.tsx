@@ -32,14 +32,14 @@ export function MedicoProfileDropdown() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full px-3 py-2 rounded-lg hover:bg-white/10 transition-colors"
+        className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl hover:bg-white/10 transition-[background-color,transform] duration-200"
       >
-        <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
+        <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
           {user?.nombres ? (
             <img
               src={`https://ui-avatars.com/api/?name=${user.nombres}+${user.apellidos}&background=fff&color=2B3E59&bold=true`}
               alt="Avatar"
-              className="w-9 h-9 rounded-full"
+              className="w-10 h-10 rounded-2xl"
             />
           ) : (
             initials
@@ -57,13 +57,13 @@ export function MedicoProfileDropdown() {
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-lg shadow-lg border border-gray-100 py-1 z-50">
+        <div className="absolute bottom-full left-0 right-0 mb-3 bg-white rounded-2xl shadow-lg border border-gray-100 p-1.5 z-50">
           <button
             onClick={() => {
               navigate('/medico/perfil');
               setOpen(false);
             }}
-            className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-2 w-full px-3.5 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <User size={16} />
             Mi Perfil
@@ -72,15 +72,15 @@ export function MedicoProfileDropdown() {
             onClick={() => {
               setOpen(false);
             }}
-            className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-2 w-full px-3.5 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <Settings size={16} />
             Configuración
           </button>
-          <div className="border-t border-gray-100 my-1" />
+          <div className="border-t border-gray-100 my-1.5" />
           <button
             onClick={handleLogout}
-            className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+            className="flex items-center gap-2 w-full px-3.5 py-2.5 rounded-xl text-sm text-red-600 hover:bg-red-50 transition-colors"
           >
             <LogOut size={16} />
             Cerrar Sesión

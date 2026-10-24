@@ -86,33 +86,33 @@ export default function MedicoAgendaPage() {
     : [];
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8">
+    <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8 lg:py-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-semibold text-[#2B3E59]">Mi Agenda</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-[#2B3E59]">Mi Agenda</h1>
           <p className="text-gray-500 text-sm mt-1">Gestiona tu disponibilidad y horarios</p>
         </div>
-        <button className="bg-[#2B3E59] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#1e2d40] transition-colors">
+        <button className="bg-[#2B3E59] text-white px-4 py-2.5 rounded-xl text-sm font-medium shadow-sm hover:bg-[#1e2d40] hover:-translate-y-0.5 transition-all">
           Configurar disponibilidad
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 md:p-6">
         <div className="flex items-center justify-between mb-6">
-          <button onClick={() => cambiarMes(-1)} className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
+          <button onClick={() => cambiarMes(-1)} className="p-2.5 rounded-xl border border-gray-200 hover:bg-gray-50 hover:-translate-y-0.5 transition-all">
             <ChevronLeft size={18} />
           </button>
           <h2 className="text-lg font-semibold text-gray-800">
             {MESES[month]} {year}
           </h2>
-          <button onClick={() => cambiarMes(1)} className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
+          <button onClick={() => cambiarMes(1)} className="p-2.5 rounded-xl border border-gray-200 hover:bg-gray-50 hover:-translate-y-0.5 transition-all">
             <ChevronRight size={18} />
           </button>
         </div>
 
-        <div className="grid grid-cols-7 gap-1">
+        <div key={`${year}-${month}`} className="agenda-calendar grid grid-cols-7 gap-1.5">
           {DIAS.map((d) => (
-            <div key={d} className="text-center text-xs font-medium text-gray-500 py-2">
+            <div key={d} className="text-center text-xs font-semibold text-gray-500 py-1.5">
               {d}
             </div>
           ))}
@@ -122,21 +122,26 @@ export default function MedicoAgendaPage() {
               <div
                 key={i}
                 onClick={() => dia && setDiaSeleccionado(new Date(year, month, dia))}
-                className={`aspect-square flex flex-col items-center justify-center rounded-lg text-sm cursor-pointer transition-colors ${
+                className={`agenda-day h-14 md:h-16 flex flex-col items-center justify-center rounded-xl text-sm cursor-pointer transition-[background-color,color,transform,box-shadow] duration-200 ${
                   dia === null
                     ? ''
                     : esHoy(dia)
-                    ? 'bg-[#2B3E59] text-white font-semibold'
+                    ? 'bg-[#2B3E59] text-white font-semibold shadow-sm ring-2 ring-[#2B3E59]/20'
                     : seleccionado(dia)
                     ? 'bg-blue-100 text-[#2B3E59] font-semibold'
-                    : 'hover:bg-gray-100 text-gray-700'
+                    : 'text-gray-700 hover:bg-gray-100 hover:-translate-y-0.5 hover:shadow-sm'
                 }`}
               >
-                {dia}
-                {tieneCitas && dia !== null && (
-                  <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
-                    esHoy(dia) ? 'bg-white' : 'bg-blue-500'
-                  }`} />
+                {dia !== null && (
+                  <>
+                    <span>{dia}</span>
+                    <span
+                      aria-hidden="true"
+                      className={`mt-1 h-1.5 min-w-1.5 rounded-full transition-transform ${
+                        tieneCitas ? 'scale-100' : 'scale-0'
+                      } ${esHoy(dia) ? 'bg-white' : 'bg-[#466b79]'}`}
+                    />
+                  </>
                 )}
               </div>
             );
@@ -145,7 +150,7 @@ export default function MedicoAgendaPage() {
       </div>
 
       {diaSeleccionado && (
-        <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-7">
           <div className="flex items-center gap-2 mb-4">
             <Calendar size={18} className="text-[#2B3E59]" />
             <h3 className="font-semibold text-gray-800">
@@ -164,7 +169,7 @@ export default function MedicoAgendaPage() {
                       <span className="text-sm font-medium text-gray-800">
                         {c.hora_inicio} – {c.hora_fin}
                       </span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${estadoColor[c.estado] ?? 'bg-gray-50 text-gray-600'}`}>
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${estadoColor[c.estado] ?? 'bg-gray-50 text-gray-600'}`}>
                         {c.estado.replace('_', ' ')}
                       </span>
                     </div>
@@ -179,7 +184,9 @@ export default function MedicoAgendaPage() {
               ))}
             </div>
           ) : (
-            <p className="text-gray-400 text-sm">Sin citas programadas para este día</p>
+            <div className="rounded-xl bg-gray-50/70 py-8 text-center">
+              <p className="text-gray-400 text-sm">Sin citas programadas para este día</p>
+            </div>
           )}
         </div>
       )}

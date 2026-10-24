@@ -31,12 +31,18 @@ export default function AsistentePage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [conversacionId, setConversacionId] = useState<string | undefined>();
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const userId = useAuthStore((state) => state.userId);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const messagesContainer = messagesContainerRef.current;
+    if (messagesContainer) {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
   }, [messages]);
 
   const sendMessage = async (text: string) => {
@@ -96,10 +102,10 @@ export default function AsistentePage() {
     <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-[600px]">
         {/* Left Panel */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col">
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-7 flex flex-col">
           {/* Avatar */}
           <div className="flex flex-col items-center text-center mb-8">
-            <div className="w-28 h-28 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center mb-4 shadow-inner">
+            <div className="w-28 h-28 rounded-3xl bg-gradient-to-br from-teal-50 to-teal-100 flex items-center justify-center mb-4 shadow-inner">
               <Bot size={52} className="text-[#2B3E59]" />
             </div>
             <h2 className="font-inter text-2xl font-bold text-[#2B3E59]">Asistente EPS</h2>
@@ -114,7 +120,7 @@ export default function AsistentePage() {
               <Link
                 key={action.label}
                 to={action.to}
-                className="flex items-center gap-3 w-full border-2 border-[#2B3E59] text-[#2B3E59] rounded-xl px-4 py-3 text-sm font-semibold hover:bg-[#2B3E59] hover:text-white transition-colors"
+                className="flex items-center gap-3 w-full border border-[#2B3E59]/30 text-[#2B3E59] rounded-xl px-4 py-3 text-sm font-semibold hover:bg-[#2B3E59] hover:text-white hover:-translate-y-0.5 transition-all"
               >
                 {action.icon}
                 {action.label}
@@ -138,23 +144,23 @@ export default function AsistentePage() {
         </div>
 
         {/* Chat Panel */}
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
+        <div className="lg:col-span-2 bg-white rounded-3xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
           {/* Chat Header */}
-          <div className="flex items-center gap-3 px-5 py-4 bg-[#2B3E59] rounded-t-2xl">
+          <div className="flex items-center gap-3 px-5 py-4 bg-[#2B3E59] rounded-t-3xl">
             <Bot size={20} className="text-white" />
             <div>
               <span className="text-white font-semibold text-sm">Asistente EPSIA</span>
               <span className="text-white/60 text-xs ml-2">- En Línea</span>
             </div>
-            <div className="w-2.5 h-2.5 bg-green-400 rounded-full ml-auto animate-pulse" />
+            <div className="chat-online-dot w-2.5 h-2.5 bg-green-400 rounded-full ml-auto" />
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-4" style={{ maxHeight: '460px' }}>
+          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-5 space-y-4" style={{ maxHeight: '460px' }}>
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`chat-message flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'assistant' && (
                   <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mr-2 mt-0.5">
@@ -162,10 +168,10 @@ export default function AsistentePage() {
                   </div>
                 )}
                 <div
-                  className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed
+                  className={`chat-bubble max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed
                     ${msg.role === 'user'
                       ? 'bg-[#2B3E59] text-white rounded-br-sm'
-                      : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                      : 'bg-secondary text-gray-800 rounded-bl-sm'
                     }`}
                 >
                   {msg.role === 'user' ? (
@@ -179,7 +185,7 @@ export default function AsistentePage() {
                     <div className="mt-2">
                       <Link
                         to="/citas/agendar"
-                        className="inline-flex items-center gap-1.5 bg-white text-[#2B3E59] text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                        className="inline-flex items-center gap-1.5 bg-white text-[#2B3E59] text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-teal-50 transition-colors"
                       >
                         <CalendarPlus size={12} />
                         Buscar disponibilidad
@@ -196,7 +202,7 @@ export default function AsistentePage() {
             ))}
 
             {loading && (
-              <div className="flex justify-start">
+              <div               className="chat-message flex justify-start">
                 <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mr-2">
                   <Bot size={14} className="text-[#2B3E59]" />
                 </div>
@@ -209,7 +215,6 @@ export default function AsistentePage() {
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           {/* Suggestions Row */}
@@ -218,7 +223,7 @@ export default function AsistentePage() {
               <button
                 key={s}
                 onClick={() => sendMessage(s)}
-                className="flex-shrink-0 text-xs border border-[#2B3E59]/30 text-[#2B3E59] px-3 py-1 rounded-full hover:bg-blue-50 transition-colors"
+                className="chat-suggestion flex-shrink-0 text-xs border border-[#2B3E59]/25 text-[#2B3E59] px-3.5 py-2 rounded-full hover:bg-[#e7f0ef] hover:border-[#466b79] hover:-translate-y-0.5 hover:shadow-sm transition-[background-color,border-color,box-shadow,transform]"
               >
                 {s}
               </button>
@@ -226,7 +231,7 @@ export default function AsistentePage() {
           </div>
 
           {/* Input */}
-          <form onSubmit={handleSubmit} className="flex items-center gap-3 p-4 border-t border-gray-100">
+          <form onSubmit={handleSubmit} className="chat-composer flex items-center gap-3 p-4 border-t border-gray-100">
             <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
               <Mic size={18} />
             </button>
@@ -235,13 +240,13 @@ export default function AsistentePage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Escribe un mensaje..."
-              className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30"
+              className="chat-input flex-1 bg-gray-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#466b79]/30"
               disabled={loading}
             />
             <button
               type="submit"
               disabled={!input.trim() || loading}
-              className="bg-[#2B3E59] text-white p-2.5 rounded-full hover:bg-[#1e2d40] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+              className="chat-send-button bg-[#2B3E59] text-white p-3 rounded-xl hover:bg-[#1e2d40] hover:-translate-y-0.5 hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
             >
               {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </button>

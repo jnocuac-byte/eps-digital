@@ -24,21 +24,29 @@ function SelectorFecha({ fecha, onChange }: { fecha: string; onChange: (f: strin
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
   return (
-    <div className="flex items-center gap-3">
-      <button onClick={() => avanzar(-1)} className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
+    <div className="flex items-center rounded-2xl border border-gray-200 bg-white p-1.5 shadow-sm">
+      <button
+        onClick={() => avanzar(-1)}
+        aria-label="Día anterior"
+        className="rounded-xl p-2.5 text-[#2B3E59] transition-colors hover:bg-[#edf3f3]"
+      >
         <ChevronLeft size={16} />
       </button>
-      <div className="flex items-center gap-2">
-        <Calendar size={16} className="text-[#2B3E59]" />
+      <div className="flex min-w-0 items-center gap-2 border-x border-gray-100 px-2 sm:px-3">
+        <Calendar size={16} className="flex-shrink-0 text-[#2B3E59]" />
         <input
           type="date"
           value={fecha}
           onChange={(e) => onChange(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30"
+          className="min-w-0 border-0 bg-transparent px-1 py-2 text-sm font-medium text-[#2B3E59] outline-none focus:ring-2 focus:ring-[#466b79]/30"
         />
-        <span className="text-sm text-gray-500 capitalize hidden sm:block">{label}</span>
+        <span className="hidden max-w-44 truncate text-sm capitalize text-gray-500 lg:block">{label}</span>
       </div>
-      <button onClick={() => avanzar(1)} className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
+      <button
+        onClick={() => avanzar(1)}
+        aria-label="Día siguiente"
+        className="rounded-xl p-2.5 text-[#2B3E59] transition-colors hover:bg-[#edf3f3]"
+      >
         <ChevronRight size={16} />
       </button>
     </div>
@@ -86,10 +94,10 @@ export default function MedicoCitasPage() {
   const resto = citas.filter((c) => c.estado !== 'programada');
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8">
+    <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8 lg:py-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-semibold text-[#2B3E59]">Mis Citas</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-[#2B3E59]">Mis Citas</h1>
           <p className="text-gray-500 text-sm mt-1">Gestiona las citas del día seleccionado</p>
         </div>
         <SelectorFecha fecha={fecha} onChange={setFecha} />
@@ -100,9 +108,9 @@ export default function MedicoCitasPage() {
           <Loader2 size={32} className="animate-spin text-[#2B3E59]" />
         </div>
       ) : (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+        <div key={fecha} className="citas-day-content space-y-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-2">
               <span className="text-sm font-semibold text-[#2B3E59]">
                 Citas programadas ({programadas.length})
               </span>
@@ -110,7 +118,7 @@ export default function MedicoCitasPage() {
             {programadas.length > 0 ? (
               <div className="divide-y divide-gray-50">
                 {programadas.map((c) => (
-                  <div key={c.cita_id} className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div key={c.cita_id} className="px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-gray-50/70">
                     <div className="flex-1">
                       <p className="text-sm font-medium text-gray-800">
                         {c.especialidad_nombre ?? c.tipo_servicio}
@@ -131,7 +139,7 @@ export default function MedicoCitasPage() {
                           }
                         }}
                         disabled={cambiarEstado.isPending}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors disabled:opacity-60"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-green-50 text-green-700 rounded-xl text-xs font-semibold hover:bg-green-100 transition-colors disabled:opacity-60"
                       >
                         <CheckCircle size={14} /> Atendida
                       </button>
@@ -142,7 +150,7 @@ export default function MedicoCitasPage() {
                           }
                         }}
                         disabled={cambiarEstado.isPending}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-50 text-yellow-700 rounded-lg text-xs font-medium hover:bg-yellow-100 transition-colors disabled:opacity-60"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-yellow-50 text-yellow-700 rounded-xl text-xs font-semibold hover:bg-yellow-100 transition-colors disabled:opacity-60"
                       >
                         <XCircle size={14} /> No asistió
                       </button>
@@ -153,7 +161,7 @@ export default function MedicoCitasPage() {
                           }
                         }}
                         disabled={cambiarEstado.isPending}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors disabled:opacity-60"
+                        className="flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-700 rounded-xl text-xs font-semibold hover:bg-red-100 transition-colors disabled:opacity-60"
                       >
                         <XCircle size={14} /> Cancelar
                       </button>
@@ -162,23 +170,29 @@ export default function MedicoCitasPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-gray-400 text-sm text-center py-10">No hay citas programadas para este día</p>
+              <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
+                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#e7f0ef] text-[#2B3E59]">
+                  <Calendar size={24} />
+                </div>
+                <p className="text-sm font-semibold text-[#2B3E59]">Agenda despejada</p>
+                <p className="mt-1 text-sm text-gray-500">No hay citas programadas para este día.</p>
+              </div>
             )}
           </div>
 
           {resto.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-100">
                 <span className="text-sm font-semibold text-gray-600">Historial del día ({resto.length})</span>
               </div>
               <div className="divide-y divide-gray-50">
                 {resto.map((c) => (
-                  <div key={c.cita_id} className="px-6 py-4 flex items-center justify-between">
+                  <div key={c.cita_id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50/70 transition-colors">
                     <div>
                       <p className="text-sm font-medium text-gray-700">{c.especialidad_nombre ?? c.tipo_servicio}</p>
                       <p className="text-xs text-gray-500">{c.hora_inicio}</p>
                     </div>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${estadoColor[c.estado]}`}>
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${estadoColor[c.estado]}`}>
                       {c.estado.replace('_', ' ')}
                     </span>
                   </div>
@@ -187,12 +201,6 @@ export default function MedicoCitasPage() {
             </div>
           )}
 
-          {citas.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
-              <Calendar size={40} className="opacity-30" />
-              <p className="text-sm">Sin citas para el {fecha}</p>
-            </div>
-          )}
         </div>
       )}
     </div>

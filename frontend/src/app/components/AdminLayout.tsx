@@ -18,15 +18,15 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen bg-page-background">
       {/* Sidebar */}
       <aside
-        className="w-64 flex-shrink-0 flex flex-col"
+        className="w-64 flex-shrink-0 flex flex-col shadow-lg"
         style={{ backgroundColor: PRIMARY }}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 px-6 py-5 border-b border-white/10">
-          <div className="bg-white rounded-full p-2">
+        <div className="flex items-center gap-3 px-6 py-6 border-b border-white/10">
+          <div className="bg-white rounded-xl p-2 shadow-sm">
             <HeartPulse size={18} color={PRIMARY} />
           </div>
           <div>
@@ -45,7 +45,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
                 to={item.to}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                   isActive
-                    ? 'bg-white/20 text-white'
+                    ? 'bg-white/20 text-white shadow-sm'
                     : 'text-white/70 hover:bg-white/10 hover:text-white'
                 }`}
               >

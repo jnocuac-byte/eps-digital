@@ -52,16 +52,16 @@ export default function MedicoNotificacionesPage() {
   });
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8">
+    <div className="medico-page-enter max-w-[1440px] mx-auto px-4 sm:px-6 py-8 lg:py-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-semibold text-[#2B3E59]">Notificaciones</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-[#2B3E59]">Notificaciones</h1>
           <p className="text-gray-500 text-sm mt-1">Mantente al día con tus citas y el sistema</p>
         </div>
         <button
           onClick={() => marcarTodas.mutate()}
           disabled={marcarTodas.isPending}
-          className="flex items-center gap-2 text-sm text-[#2B3E59] font-medium hover:underline disabled:opacity-60"
+          className="flex items-center gap-2 text-sm text-[#2B3E59] font-semibold hover:underline disabled:opacity-60"
         >
           <CheckCheck size={16} />
           Marcar todas como leídas
@@ -78,10 +78,10 @@ export default function MedicoNotificacionesPage() {
           <button
             key={f.key}
             onClick={() => setFiltro(f.key as typeof filtro)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+            className={`px-4 py-2.5 rounded-xl text-sm font-semibold whitespace-nowrap transition-[background-color,color,transform] duration-200 ${
               filtro === f.key
                 ? 'bg-[#2B3E59] text-white'
-                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:-translate-y-0.5'
             }`}
           >
             {f.label}
@@ -92,16 +92,16 @@ export default function MedicoNotificacionesPage() {
       {isLoading ? (
         <div className="text-center py-16 text-gray-400">Cargando...</div>
       ) : filtradas.length > 0 ? (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 divide-y divide-gray-50">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 divide-y divide-gray-50 overflow-hidden">
           {filtradas.map((n) => (
             <div
               key={n.notificacion_id}
               onClick={() => !n.leida && marcarLeida.mutate(n.notificacion_id)}
-              className={`px-6 py-4 flex items-start gap-4 cursor-pointer transition-colors ${
-                !n.leida ? 'bg-blue-50/50 hover:bg-blue-50' : 'hover:bg-gray-50'
+              className={`px-6 py-5 flex items-start gap-4 cursor-pointer transition-colors ${
+                !n.leida ? 'bg-blue-50/50 hover:bg-blue-50' : 'hover:bg-gray-50/80'
               }`}
             >
-              <span className="text-xl flex-shrink-0">{tipoIcono[n.tipo] || '📋'}</span>
+              <span className="w-10 h-10 rounded-2xl bg-secondary flex items-center justify-center text-lg flex-shrink-0">{tipoIcono[n.tipo] || '📋'}</span>
               <div className="flex-1 min-w-0">
                 <p className={`text-sm ${!n.leida ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
                   {n.titulo}

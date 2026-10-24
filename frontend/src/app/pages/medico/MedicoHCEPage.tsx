@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Clock, User, Loader2 } from 'lucide-react';
+import { Search, Clock, ChevronDown, Loader2, RotateCcw } from 'lucide-react';
 import { authApi, citasApi, userApi } from '../../lib/apiClient';
 import { useAuthStore } from '../../stores/authStore';
 
@@ -98,64 +98,104 @@ export default function MedicoHCEPage() {
 
   const loading = loadingCitas || loadingPacientes;
   const listaPacientes = busqueda ? [busqueda] : recientes;
+  const mostrarRecientes = () => {
+    setBusqueda(null);
+    setNumeroDoc('');
+  };
 
   return (
-    <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-8">
+    <div className="medico-page-enter max-w-[1440px] mx-auto px-4 sm:px-6 py-8 lg:py-10">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-[#2B3E59]">Historias Clínicas</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-[#2B3E59]">Historias Clínicas</h1>
         <p className="text-gray-500 text-sm mt-1">Busca pacientes por número de documento</p>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <select
-            value={tipoDoc}
-            onChange={(e) => setTipoDoc(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30 w-full sm:w-48"
-          >
-            {TIPO_DOC_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={numeroDoc}
-            onChange={(e) => setNumeroDoc(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleBuscar()}
-            placeholder="Número de documento"
-            className="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2B3E59]/30"
-          />
-          <button
-            onClick={handleBuscar}
-            className="bg-[#2B3E59] text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-[#1e2d40] transition-colors flex items-center gap-2"
-          >
-            <Search size={16} />
-            Buscar
-          </button>
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm md:p-6">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e7f0ef] text-[#2B3E59]">
+              <Search size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[#2B3E59]">Buscar historia clínica</p>
+              <p className="text-xs text-gray-500">Ingresa el documento del paciente</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="relative w-full sm:w-56">
+              <select
+                value={tipoDoc}
+                onChange={(e) => setTipoDoc(e.target.value)}
+                className="w-full appearance-none rounded-xl border border-gray-300 bg-[#f7faf9] px-3 py-3 pr-10 text-sm font-medium text-[#2B3E59] outline-none transition-colors hover:border-[#466b79] focus:border-[#466b79] focus:ring-2 focus:ring-[#466b79]/30"
+              >
+                {TIPO_DOC_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#466b79]" />
+            </div>
+            <input
+              type="text"
+              value={numeroDoc}
+              onChange={(e) => setNumeroDoc(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleBuscar()}
+              placeholder="Número de documento"
+              className="flex-1 rounded-xl border border-gray-300 px-3 py-3 text-sm outline-none transition-colors focus:border-[#466b79] focus:ring-2 focus:ring-[#466b79]/30"
+            />
+            <button
+              onClick={handleBuscar}
+              className="flex items-center gap-2 rounded-xl bg-[#2B3E59] px-6 py-3 text-sm font-medium text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-[#1e2d40]"
+            >
+              <Search size={16} />
+              Buscar
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Clock size={18} className="text-[#2B3E59]" />
-          <h2 className="font-semibold text-gray-800">
-            {busqueda ? 'Resultado de búsqueda' : 'Pacientes recientes'}
-          </h2>
-        </div>
+        <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm md:p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e7f0ef] text-[#2B3E59]">
+                <Clock size={18} />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-[#2B3E59]">
+                  {busqueda ? 'Resultado de búsqueda' : 'Pacientes recientes'}
+                </h2>
+                {!busqueda && (
+                  <p className="mt-0.5 text-xs text-gray-500">Accede rápidamente a tus últimos pacientes</p>
+                )}
+              </div>
+            </div>
+            {!busqueda && recientes.length > 0 && (
+              <span className="rounded-full bg-[#edf3f3] px-2.5 py-1 text-xs font-semibold text-[#2B3E59]">
+                {recientes.length}
+              </span>
+            )}
+            {busqueda && (
+              <button
+                onClick={mostrarRecientes}
+                className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-[#2B3E59] transition-colors hover:bg-[#edf3f3]"
+              >
+                <RotateCcw size={14} />
+                Ver pacientes recientes
+              </button>
+            )}
+          </div>
         {loading ? (
           <div className="flex items-center justify-center py-10">
             <Loader2 size={24} className="animate-spin text-[#2B3E59]" />
           </div>
         ) : listaPacientes.length > 0 ? (
-          <ul className="space-y-2">
+          <ul className="divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-100">
             {listaPacientes.map((p) => (
-              <li key={p.usuario_id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-                  <User size={18} className="text-gray-500" />
+              <li key={p.usuario_id} className="group flex cursor-pointer items-center gap-3 p-4 transition-[background-color,box-shadow,transform] duration-200 hover:bg-[#f5f9f8] hover:shadow-sm">
+                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-[#dcebea] text-sm font-bold text-[#2B3E59] transition-transform duration-200 group-hover:scale-105">
+                  {`${p.nombres.charAt(0)}${p.apellidos.charAt(0)}`.toUpperCase()}
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-800">{p.nombres} {p.apellidos}</p>
-                  <p className="text-xs text-gray-500">{p.tipo_documento} {p.numero_documento}</p>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-[#223044]">{p.nombres} {p.apellidos}</p>
+                  <p className="mt-0.5 text-xs font-medium text-gray-500">{p.tipo_documento} · {p.numero_documento}</p>
                 </div>
               </li>
             ))}
@@ -165,6 +205,7 @@ export default function MedicoHCEPage() {
             {busqueda ? 'Paciente no encontrado' : 'Sin pacientes con citas registradas'}
           </p>
         )}
+        </div>
       </div>
     </div>
   );
