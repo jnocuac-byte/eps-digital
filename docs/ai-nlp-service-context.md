@@ -78,6 +78,22 @@ JSON con la guía de triaje de la EPS:
 
 Se inyecta como contexto en el system prompt del agente de triaje.
 
+### Recuperación semántica RAG en el chat
+
+El flujo `POST /chat` realiza una recuperación best effort en
+`app/knowledge/retrieval.py` antes de clasificar la intención. Genera un
+embedding `RETRIEVAL_QUERY`, consulta `knowledge_chunks` por distancia coseno
+y conserva hasta tres fragmentos con similitud mínima configurable mediante
+`RAG_CLINICAL_SIMILARITY_THRESHOLD` (valor predeterminado: `0.70`).
+
+La clasificación híbrida mantiene prioridad para las intenciones explícitas
+de agendamiento. Si no hay intención de agenda, una keyword clínica o una
+similitud RAG sobre el umbral enruta al agente de triaje. Los fragmentos
+recuperados se inyectan únicamente en la invocación actual del agente y no
+modifican el system prompt global ni el estado persistido de la conversación.
+Si falla Gemini, la consulta vectorial o la configuración RAG, el chat continúa
+con la guía estática de triaje y se registra un warning.
+
 ### Modelos de salida del Triage
 
 ```python
