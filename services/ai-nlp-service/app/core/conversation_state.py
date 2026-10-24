@@ -161,7 +161,7 @@ class ConversationState:
 
 
 def classify_intent(
-    message: str, state: ConversationState
+    message: str, state: ConversationState, semantic_clinical: bool = False
 ) -> Literal["triage", "scheduling", "continue"]:
     """Clasifica la intención del usuario para enrutar al agente correcto.
 
@@ -176,8 +176,8 @@ def classify_intent(
     if any(kw in msg for kw in SCHEDULING_KEYWORDS):
         return "scheduling"
 
-    # Palabras clave médicas → triage
-    if any(kw in msg for kw in TRIAGE_KEYWORDS):
+    # Palabras clave médicas o similitud semántica → triage
+    if semantic_clinical or any(kw in msg for kw in TRIAGE_KEYWORDS):
         return "triage"
 
     # Sin señal clara → continuar con agente actual

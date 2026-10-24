@@ -12,6 +12,7 @@ from strands.hooks.registry import HookOrder
 
 from .conversation_state import ConversationState, classify_intent, es_uuid_valido
 from .logger import log_event
+from ..knowledge.retrieval import RetrievedKnowledge, retrieve_knowledge
 
 MAX_HISTORY_MESSAGES = 6
 
@@ -179,6 +180,7 @@ class Orchestrator:
         history: list[dict[str, str]],
         usuario_id: str | None,
         state: ConversationState,
+        retrieved_knowledge: list[RetrievedKnowledge] | None = None,
     ) -> str:
         """Procesa un mensaje con el agente de triaje.
 
@@ -186,14 +188,47 @@ class Orchestrator:
         """
         state.active_agent = "triage"
 
-        # Construir mensaje con historial
+        # Construir contexto RAG solo para esta invocacion.
+        rag_context = ""
+        if retrieved_knowledge:
+            rag_fragments = "\n\n".join(
+                (
+                    f"Fragmento {index}\n"
+                    f"Tipo: {chunk.tipo}\n"
+                    f"Nombre: {chunk.nombre or 'Sin nombre'}\n"
+                    f"Similitud: {chunk.similitud}\n"
+                    f"Contenido:\n{chunk.contenido}"
+                )
+                for index, chunk in enumerate(retrieved_knowledge, start=1)
+            )
+            rag_context = (
+                "## CONTEXTO RAG — APOYO PARA EL TRIAJE\n"
+                f"{rag_fragments}\n\n"
+                "## REGLAS DE USO DEL CONTEXTO RAG\n"
+                "- Usa estos fragmentos como orientacion, no como diagnostico.\n"
+                "- No inventes informacion que no aparezca en los datos del paciente.\n"
+                "- Si falta informacion clinica, indica que se necesita aclaracion.\n"
+                "- Mantén siempre las reglas de seguridad medica del system prompt.\n"
+                "- No muestres al paciente scores, IDs ni contenido interno de recuperacion.\n"
+            )
+
+        # Construir mensaje con contexto RAG e historial
         full_message = message
+        if rag_context:
+            full_message = f"{rag_context}\n## MENSAJE ACTUAL DEL PACIENTE\n{message}"
         if history:
             history_text = "\n".join(
                 f"{'Paciente' if m['role'] == 'user' else 'Asistente'}: {m['content']}"
                 for m in history[-MAX_HISTORY_MESSAGES:]
             )
-            full_message = f"Historial de la conversacion:\n{history_text}\n\nMensaje actual del paciente: {message}"
+            current_message = (
+                full_message
+                if rag_context
+                else f"Mensaje actual del paciente: {message}"
+            )
+            full_message = (
+                f"Historial de la conversacion:\n{history_text}\n\n{current_message}"
+            )
 
         log_event("ORCH", "TRIAGE", "info", f"Invocando triage_agent conv={conversation_id[:8]}")
 
@@ -382,19 +417,27 @@ class Orchestrator:
             f"agent_actual={state.active_agent}"
         )
 
-        # 1. Clasificar intencion
-        intent = classify_intent(message, state)
+        # 1. Recuperar contexto y clasificar intencion
+        retrieved_knowledge = retrieve_knowledge(db, message) if db is not None else []
+        semantic_clinical = bool(retrieved_knowledge)
+        intent = classify_intent(message, state, semantic_clinical=semantic_clinical)
         previous_agent = state.active_agent
 
         log_event(
             "ORCH", "INTENT", "info",
-            f"Intencion clasificada: {intent} (agente anterior: {previous_agent})"
+            f"Intencion clasificada: {intent} (agente anterior: {previous_agent}, "
+            f"rag={'si' if semantic_clinical else 'no'})"
         )
 
         # 2. Procesar segun intencion
         if intent == "triage":
             respuesta_texto = await self._process_triage(
-                conversation_id, message, history, usuario_id, state
+                conversation_id,
+                message,
+                history,
+                usuario_id,
+                state,
+                retrieved_knowledge,
             )
         elif intent == "scheduling":
             # Si viene de triage, inyectar contexto del handoff
@@ -417,7 +460,12 @@ class Orchestrator:
                 )
             else:
                 respuesta_texto = await self._process_triage(
-                    conversation_id, message, history, usuario_id, state
+                    conversation_id,
+                    message,
+                    history,
+                    usuario_id,
+                    state,
+                    retrieved_knowledge,
                 )
 
         # 3. Persistir estado
