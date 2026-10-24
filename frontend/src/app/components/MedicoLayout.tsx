@@ -19,13 +19,13 @@ export function MedicoLayout() {
   const location = useLocation();
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen bg-page-background">
       <aside
-        className="w-56 flex-shrink-0 flex flex-col"
+        className="w-60 flex-shrink-0 flex flex-col shadow-lg"
         style={{ backgroundColor: PRIMARY }}
       >
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
-          <div className="bg-white rounded-full p-2">
+        <div className="flex items-center gap-3 px-5 py-6 border-b border-white/10">
+          <div className="bg-white rounded-xl p-2 shadow-sm">
             <HeartPulse size={16} color={PRIMARY} />
           </div>
           <div>
@@ -43,7 +43,7 @@ export function MedicoLayout() {
                 to={item.to}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                   isActive
-                    ? 'bg-white/20 text-white'
+                    ? 'bg-white/20 text-white shadow-sm'
                     : 'text-white/70 hover:bg-white/10 hover:text-white'
                 }`}
               >
@@ -60,7 +60,7 @@ export function MedicoLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-end px-6 flex-shrink-0">
+        <header className="h-[4.5rem] bg-white border-b border-gray-100 flex items-center justify-end px-6 flex-shrink-0 shadow-sm">
           <NotificationBell />
         </header>
 

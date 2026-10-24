@@ -57,17 +57,17 @@ export function Navbar() {
       style={{ backgroundColor: PRIMARY }}
     >
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-[4.5rem]">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 flex-shrink-0">
-            <div className="bg-white rounded-full p-1.5">
+          <Link to="/" className="flex items-center gap-2.5 flex-shrink-0">
+            <div className="bg-white rounded-xl p-1.5 shadow-sm">
               <HeartPulse size={20} color={PRIMARY} />
             </div>
-            <span className="text-white font-inter font-semibold text-lg">EPS Digital</span>
+            <span className="text-white font-inter font-semibold text-lg tracking-tight">EPS Digital</span>
           </Link>
 
           {/* Desktop Nav */}
-          <div className="hidden lg:flex items-center gap-6">
+          <div className="hidden lg:flex items-center gap-5">
             {navLinks.map((link) => {
               if (link.private && !isAuthenticated) return null;
               if (link.publicOnly && isAuthenticated) return null;
@@ -87,7 +87,7 @@ export function Navbar() {
                 <Link
                   key={link.to}
                   to={link.to}
-                  className="text-white hover:text-blue-200 transition-colors text-sm font-medium"
+                  className={`text-sm font-medium transition-colors ${location.pathname === link.to ? 'text-white' : 'text-white/75 hover:text-white'}`}
                 >
                   {link.label}
                 </Link>
@@ -98,13 +98,13 @@ export function Navbar() {
             <div className="relative" ref={citasRef}>
               <button
                 onClick={() => setCitasOpen(!citasOpen)}
-                className="flex items-center gap-1 text-white hover:text-blue-200 transition-colors text-sm font-medium"
+                className="flex items-center gap-1 text-white/75 hover:text-white transition-colors text-sm font-medium"
               >
                 Citas Médicas
                 <ChevronDown size={14} className={`transition-transform ${citasOpen ? 'rotate-180' : ''}`} />
               </button>
               {citasOpen && (
-                <div className="absolute top-full left-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
+                <div                 className="absolute top-full left-0 mt-3 w-60 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
                   {citasItems.map((item) => (
                     <Link
                       key={item.to}
@@ -156,7 +156,7 @@ export function Navbar() {
 
           {/* Mobile Hamburger */}
           <button
-            className="lg:hidden text-white p-2"
+            className="lg:hidden text-white/90 p-2.5 rounded-lg hover:bg-white/10"
             onClick={() => setMobileOpen(!mobileOpen)}
           >
             {mobileOpen ? <X size={24} /> : <Menu size={24} />}
@@ -167,7 +167,7 @@ export function Navbar() {
       {/* Mobile Menu */}
       {mobileOpen && (
         <div className="lg:hidden bg-[#1e2d40] border-t border-white/10">
-          <div className="px-4 py-4 space-y-1">
+          <div className="px-4 py-5 space-y-1">
             {navLinks.map((link) => {
               if (link.private && !isAuthenticated) return null;
               if (link.publicOnly && isAuthenticated) return null;

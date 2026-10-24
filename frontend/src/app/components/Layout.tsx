@@ -1,13 +1,20 @@
-import { Outlet } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
+import { useEffect } from 'react';
 import { Navbar } from './Navbar';
 import { Footer } from './Footer';
 import { Toaster } from 'sonner';
 
 export function Layout() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [pathname]);
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#F5F5F5]">
+    <div className="min-h-screen flex flex-col bg-page-background">
       <Navbar />
-      <main className="flex-1 pt-16">
+      <main className="flex-1 pt-[4.5rem]">
         <Outlet />
       </main>
       <Footer />

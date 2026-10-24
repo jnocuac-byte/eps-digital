@@ -6,17 +6,17 @@ const PRIMARY = '#2B3E59';
 export function Footer() {
   return (
     <footer style={{ backgroundColor: PRIMARY }} className="text-white mt-auto">
-      <div className="max-w-[1440px] mx-auto px-6 py-10">
+      <div className="max-w-[1440px] mx-auto px-6 py-12">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Brand */}
           <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="bg-white rounded-full p-1.5">
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="bg-white rounded-xl p-1.5 shadow-sm">
                 <HeartPulse size={18} color={PRIMARY} />
               </div>
               <span className="font-inter font-semibold text-lg">EPS Digital</span>
             </div>
-            <p className="text-white/70 text-sm leading-relaxed">
+            <p className="text-white/75 text-sm leading-relaxed max-w-sm">
               Plataforma digital para la gestión de citas médicas con Inteligencia Artificial.
             </p>
           </div>
@@ -24,7 +24,7 @@ export function Footer() {
           {/* Links */}
           <div>
             <h4 className="font-semibold mb-4">Enlaces rápidos</h4>
-            <ul className="space-y-2 text-sm text-white/80">
+            <ul className="space-y-2.5 text-sm text-white/80">
               <li><Link to="/" className="hover:text-white transition-colors">Inicio</Link></li>
               <li><Link to="/servicios" className="hover:text-white transition-colors">Servicios</Link></li>
               <li><Link to="/ayuda" className="hover:text-white transition-colors">Ayuda</Link></li>
@@ -36,7 +36,7 @@ export function Footer() {
           {/* Contact */}
           <div>
             <h4 className="font-semibold mb-4">Contacto</h4>
-            <ul className="space-y-2 text-sm text-white/80">
+            <ul className="space-y-2.5 text-sm text-white/80">
               <li className="flex items-center gap-2">
                 <Mail size={14} />
                 <span>correo@epsdigital.com</span>
