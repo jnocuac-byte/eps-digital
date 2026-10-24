@@ -57,9 +57,9 @@ function MiniCalendar({ selected, onSelect }: { selected: Date | null; onSelect:
               key={i}
               disabled={isPast}
               onClick={() => onSelect(date)}
-              className={`text-xs py-1.5 rounded transition-colors
+              className={`appointment-day text-xs py-1.5 rounded-lg transition-[background-color,color,transform,box-shadow] duration-200
                 ${isPast ? 'text-white/30 cursor-not-allowed' : ''}
-                ${isSelected ? 'bg-white text-[#2B3E59] font-semibold' : 'hover:bg-white/20'}
+                ${isSelected ? 'bg-white text-[#2B3E59] font-semibold shadow-sm scale-105' : 'hover:bg-white/20 hover:-translate-y-0.5'}
               `}
             >
               {day}
@@ -397,7 +397,8 @@ export default function AgendarCitaPage() {
             <button
               onClick={() => mutation.mutate()}
               disabled={!canSubmit || mutation.isPending}
-              className="flex-1 bg-[#2B3E59] text-white font-semibold py-2.5 rounded-lg text-sm hover:bg-[#1e2d40] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              title={!canSubmit && !mutation.isPending ? 'Completa el servicio, la fecha y la hora para continuar' : undefined}
+              className="appointment-submit flex-1 bg-[#2B3E59] text-white font-semibold py-2.5 rounded-lg text-sm hover:bg-[#1e2d40] hover:-translate-y-0.5 hover:shadow-md transition-[background-color,box-shadow,transform,opacity] duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {mutation.isPending ? <Loader2 size={16} className="animate-spin" /> : null}
               {esReprogramacion ? 'Confirmar Reprogramación' : 'Confirmar Cita'}
@@ -421,7 +422,9 @@ export default function AgendarCitaPage() {
             ].map((item) => (
               <div key={item.label} className="border-b border-white/10 pb-3">
                 <p className="text-white/60 text-xs mb-0.5">{item.label}:</p>
-                <p className="text-white">{item.value || '—'}</p>
+                <p key={item.value || item.label} className={item.value ? 'appointment-summary-value text-white' : 'text-white/45 italic'}>
+                  {item.value || 'Por seleccionar'}
+                </p>
               </div>
             ))}
           </div>

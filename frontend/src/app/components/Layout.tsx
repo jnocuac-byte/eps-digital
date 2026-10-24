@@ -15,7 +15,9 @@ export function Layout() {
     <div className="min-h-screen flex flex-col bg-page-background">
       <Navbar />
       <main className="flex-1 pt-[4.5rem]">
-        <Outlet />
+        <div key={pathname} className="app-page-enter">
+          <Outlet />
+        </div>
       </main>
       <Footer />
       <Toaster position="top-right" richColors />

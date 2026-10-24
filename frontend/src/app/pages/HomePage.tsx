@@ -6,8 +6,6 @@ import { useQuery } from '@tanstack/react-query';
 import { citasApi } from '../lib/apiClient';
 import { parseFechaLocal } from '../lib/fechas';
 
-const HERO_DOCTOR = '/images/hero-medico.webp';
-
 const benefits = [
   {
     icon: <Calendar size={36} className="text-[#2B3E59]" />,
@@ -54,10 +52,10 @@ export default function HomePage() {
         className="relative overflow-hidden"
         style={{ background: 'linear-gradient(135deg, #1a2e45 0%, #2B3E59 58%, #466b79 100%)' }}
       >
-        <div className="max-w-[1440px] mx-auto px-6 py-16 md:py-24 flex flex-col md:flex-row items-center gap-12">
+        <div className="max-w-[1440px] mx-auto px-6 py-12 md:py-14 flex flex-col md:flex-row items-center gap-8 md:gap-10">
           <div className="flex-1 text-white">
             {isAuthenticated && user ? (
-              <div className="mb-6 bg-white/10 rounded-2xl p-5 border border-white/20 max-w-sm shadow-lg">
+              <div className="hero-welcome mb-6 bg-white/10 rounded-2xl p-5 border border-white/20 max-w-sm shadow-lg">
                 <p className="text-white/80 text-sm mb-1">¡Bienvenido de vuelta!</p>
                 <p className="text-white text-lg font-semibold font-inter">
                   {user.nombres} {user.apellidos}
@@ -78,13 +76,13 @@ export default function HomePage() {
             <div className="flex flex-wrap gap-4">
               <Link
                 to="/citas/agendar"
-                className="bg-white text-[#2B3E59] font-semibold px-7 py-3 rounded-xl shadow-sm hover:bg-teal-50 hover:-translate-y-0.5 transition-all"
+                className="hero-action bg-white text-[#2B3E59] font-semibold px-7 py-3 rounded-xl shadow-sm hover:bg-teal-50 hover:-translate-y-0.5 hover:shadow-md transition-all"
               >
                 Agendar Cita
               </Link>
               <Link
                 to="/servicios"
-                className="border border-white/70 text-white font-semibold px-7 py-3 rounded-xl hover:bg-white hover:text-[#2B3E59] transition-all"
+                className="hero-action border border-white/70 text-white font-semibold px-7 py-3 rounded-xl hover:bg-white hover:text-[#2B3E59] hover:shadow-md transition-all"
               >
                 Conoce más
               </Link>
@@ -107,12 +105,20 @@ export default function HomePage() {
               </div>
             )}
           </div>
-          <div className="relative flex-shrink-0 w-full md:w-[430px] lg:w-[520px] h-[340px] md:h-[440px] lg:h-[500px]">
-            <img
-              src={HERO_DOCTOR}
-              alt="Médico profesional"
-              className="absolute inset-0 w-full h-full object-contain rounded-none scale-[1.16] md:scale-[1.2] lg:scale-[1.22]"
-            />
+          <div className="hero-visual relative flex-shrink-0 w-full md:w-[400px] lg:w-[460px] h-[280px] md:h-[360px] lg:h-[400px]" aria-hidden="true">
+            <div className="hero-visual-glow absolute inset-10 rounded-full bg-[#9bd4cc]/15 blur-3xl" />
+            <div className="absolute right-4 top-8 h-44 w-44 rounded-[3rem] border border-white/20 bg-white/10 rotate-12" />
+            <div className="absolute bottom-10 left-10 h-32 w-32 rounded-full border border-[#9bd4cc]/30 bg-[#9bd4cc]/10" />
+            <svg viewBox="0 0 420 390" className="relative h-full w-full" fill="none">
+              <path d="M82 283C61 220 75 139 136 91C201 40 304 54 347 124C390 194 357 298 281 331C200 367 105 349 82 283Z" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.2)" />
+              <path d="M132 258C120 210 135 158 174 129C215 99 279 105 309 145C340 186 326 245 284 270C237 298 145 300 132 258Z" fill="#DCECEB" fillOpacity="0.92" />
+              <path d="M184 196C184 161 210 136 242 136C274 136 298 161 298 196V249H184V196Z" fill="#2B3E59" />
+              <path d="M205 202C205 180 221 164 242 164C263 164 279 180 279 202V250H205V202Z" fill="#F4F7F7" />
+              <path d="M220 217H264M242 199V235" stroke="#466B79" strokeWidth="7" strokeLinecap="round" />
+              <circle cx="112" cy="120" r="8" fill="#9BD4CC" />
+              <circle cx="335" cy="251" r="6" fill="#F7D58A" />
+              <path d="M106 287C136 310 169 319 205 319" stroke="#9BD4CC" strokeWidth="4" strokeLinecap="round" strokeDasharray="2 12" />
+            </svg>
           </div>
         </div>
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-[#2B3E59]" />
@@ -120,8 +126,8 @@ export default function HomePage() {
 
       {/* Próxima Cita (si autenticado) */}
       {isAuthenticated && (
-        <section className="max-w-[1440px] mx-auto px-6 py-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-7">
+        <section className="next-appointment-wrap max-w-[1440px] mx-auto px-6 py-6">
+          <div className="next-appointment-card bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-7">
             <div className="flex items-center gap-2 mb-3">
               <Clock size={18} className="text-[#2B3E59]" />
               <h3 className="font-inter font-semibold text-[#2B3E59]">Próxima Cita</h3>

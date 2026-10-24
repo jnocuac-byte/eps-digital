@@ -152,7 +152,7 @@ export default function AsistentePage() {
               <span className="text-white font-semibold text-sm">Asistente EPSIA</span>
               <span className="text-white/60 text-xs ml-2">- En Línea</span>
             </div>
-            <div className="w-2.5 h-2.5 bg-green-400 rounded-full ml-auto animate-pulse" />
+            <div className="chat-online-dot w-2.5 h-2.5 bg-green-400 rounded-full ml-auto" />
           </div>
 
           {/* Messages */}
@@ -160,7 +160,7 @@ export default function AsistentePage() {
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`chat-message flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'assistant' && (
                   <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mr-2 mt-0.5">
@@ -168,7 +168,7 @@ export default function AsistentePage() {
                   </div>
                 )}
                 <div
-                  className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed
+                  className={`chat-bubble max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed
                     ${msg.role === 'user'
                       ? 'bg-[#2B3E59] text-white rounded-br-sm'
                       : 'bg-secondary text-gray-800 rounded-bl-sm'
@@ -202,7 +202,7 @@ export default function AsistentePage() {
             ))}
 
             {loading && (
-              <div className="flex justify-start">
+              <div               className="chat-message flex justify-start">
                 <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mr-2">
                   <Bot size={14} className="text-[#2B3E59]" />
                 </div>
@@ -223,7 +223,7 @@ export default function AsistentePage() {
               <button
                 key={s}
                 onClick={() => sendMessage(s)}
-                className="flex-shrink-0 text-xs border border-[#2B3E59]/30 text-[#2B3E59] px-3 py-1.5 rounded-lg hover:bg-teal-50 transition-colors"
+                className="chat-suggestion flex-shrink-0 text-xs border border-[#2B3E59]/25 text-[#2B3E59] px-3.5 py-2 rounded-full hover:bg-[#e7f0ef] hover:border-[#466b79] hover:-translate-y-0.5 hover:shadow-sm transition-[background-color,border-color,box-shadow,transform]"
               >
                 {s}
               </button>
@@ -231,7 +231,7 @@ export default function AsistentePage() {
           </div>
 
           {/* Input */}
-          <form onSubmit={handleSubmit} className="flex items-center gap-3 p-4 border-t border-gray-100">
+          <form onSubmit={handleSubmit} className="chat-composer flex items-center gap-3 p-4 border-t border-gray-100">
             <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
               <Mic size={18} />
             </button>
@@ -240,13 +240,13 @@ export default function AsistentePage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Escribe un mensaje..."
-              className="flex-1 bg-gray-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#466b79]/30"
+              className="chat-input flex-1 bg-gray-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#466b79]/30"
               disabled={loading}
             />
             <button
               type="submit"
               disabled={!input.trim() || loading}
-              className="bg-[#2B3E59] text-white p-3 rounded-xl hover:bg-[#1e2d40] hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+              className="chat-send-button bg-[#2B3E59] text-white p-3 rounded-xl hover:bg-[#1e2d40] hover:-translate-y-0.5 hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
             >
               {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </button>
