@@ -53,7 +53,7 @@ export function NotificationBell() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
+        className="relative p-2.5 rounded-xl hover:bg-gray-100 hover:-translate-y-0.5 transition-all"
       >
         <Bell size={20} className="text-gray-600" />
         {noLeidas > 0 && (
@@ -64,7 +64,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-100 z-50 overflow-hidden">
+        <div className="notification-popover absolute right-0 top-full mt-3 w-80 bg-white rounded-2xl shadow-lg border border-gray-100 z-50 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <h3 className="font-semibold text-gray-800 text-sm">Notificaciones</h3>
             {noLeidas > 0 && (
@@ -77,7 +77,7 @@ export function NotificationBell() {
               notificaciones.slice(0, 5).map((n) => (
                 <div
                   key={n.notificacion_id}
-                  className={`px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-50 last:border-0 ${
+                  className={`notification-item px-4 py-3.5 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-50 last:border-0 ${
                     !n.leida ? 'bg-blue-50/50' : ''
                   }`}
                   onClick={() => {
