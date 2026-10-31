@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
 
     try:
         scheduling_model = build_fallback_model(
-            order=["gemini", "cerebras", "mistral"],
+            order=["gemini-lite", "groq", "gemini"],
         )
         log_event(
             "MAIN",
