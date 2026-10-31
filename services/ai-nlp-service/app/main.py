@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from .core import Orchestrator
+from .core.auth import verify_access_token
 from .core.logger import log_event, setup_logger
 from .core.error_handler import register_exception_handlers
 from .core.security_headers import register_security_headers
@@ -177,7 +178,11 @@ def _mapear_historial_a_mensajes_llm(mensajes_db: list[Any]) -> list[dict[str, s
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])
-async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
+async def post_chat(
+    payload: ChatRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ChatResponse:
     """Gestiona el flujo conversacional con orquestador multi-agente Strands."""
     t0 = time.time()
     log_event(
@@ -186,20 +191,28 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
         f"conv={payload.conversacion_id or 'nueva'}"
     )
 
-    orchestrator = getattr(app.state, "orchestrator", None)
-    if orchestrator is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Orquestador no disponible. Verifica GROQ_API_KEY o GEMINI_API_KEY.",
-        )
-
     try:
-        # 1. Gestionar conversacion
-        if payload.conversacion_id is None:
-            usuario_id = payload.usuario_id or UUID(
-                "00000000-0000-0000-0000-000000000000"
+        # 1. La identidad solo proviene del access token.
+        usuario_id_uuid = verify_access_token(request.headers.get("Authorization"))
+        usuario_id = str(usuario_id_uuid)
+        if payload.usuario_id is not None and payload.usuario_id != usuario_id_uuid:
+            log_event(
+                "MAIN",
+                "AUTH",
+                "warning",
+                "Se ignoró usuario_id del body porque no coincide con el token",
             )
-            conversacion = crear_conversacion(db, usuario_id=usuario_id)
+
+        orchestrator = getattr(app.state, "orchestrator", None)
+        if orchestrator is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Orquestador no disponible. Verifica GROQ_API_KEY o GEMINI_API_KEY.",
+            )
+
+        # 2. Gestionar conversacion
+        if payload.conversacion_id is None:
+            conversacion = crear_conversacion(db, usuario_id=usuario_id_uuid)
             log_event("MAIN", "CONV", "info", f"Nueva conversacion: {conversacion.conversacion_id}")
         else:
             conversacion = get_conversacion(db, payload.conversacion_id)
@@ -208,7 +221,15 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Conversacion no encontrada",
                 )
-            if conversacion.estado == "cerrada":
+            if conversacion.usuario_id != usuario_id_uuid:
+                log_event(
+                    "MAIN",
+                    "AUTH",
+                    "warning",
+                    f"Conversacion ajena {payload.conversacion_id}; se crea una nueva",
+                )
+                conversacion = crear_conversacion(db, usuario_id=usuario_id_uuid)
+            elif conversacion.estado == "cerrada":
                 log_event("MAIN", "CONV", "warning", f"Conversacion cerrada: {payload.conversacion_id}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -234,12 +255,11 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
         history = _mapear_historial_a_mensajes_llm(historial_db)
 
         # 4. Procesar con el orquestador Strands
-        usuario_id_str = str(payload.usuario_id) if payload.usuario_id else None
         respuesta_texto, state = await orchestrator.process(
             conversation_id=str(conversacion.conversacion_id),
             message=payload.mensaje,
             history=history,
-            usuario_id=usuario_id_str,
+            usuario_id=usuario_id,
             db=db,
         )
 

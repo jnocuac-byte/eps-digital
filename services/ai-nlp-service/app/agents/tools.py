@@ -7,6 +7,7 @@ import unicodedata
 from datetime import datetime
 from threading import RLock
 from typing import Any
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -61,6 +62,22 @@ def _obtener_catalog_service_url() -> str | None:
 def _obtener_citas_service_url() -> str | None:
     load_dotenv()
     return os.getenv("CITAS_SERVICE_URL")
+
+
+def _verified_usuario_id(tool_context: ToolContext | None) -> str | None:
+    """Obtiene la identidad verificada por el orquestador, nunca la del LLM."""
+    invocation_state = tool_context.invocation_state if tool_context else {}
+    turn_context = invocation_state.get("turn_context")
+    usuario_id = getattr(turn_context, "usuario_id", None)
+    if not usuario_id:
+        usuario_id = invocation_state.get("usuario_id")
+    try:
+        parsed = UUID(str(usuario_id))
+    except (TypeError, ValueError):
+        return None
+    if parsed.int == 0:
+        return None
+    return str(parsed)
 
 
 def _consultar_catalog_service(
@@ -545,8 +562,11 @@ def proponer_cita(
     }, ensure_ascii=False)
 
 
-@tool
-def consultar_citas_usuario(usuario_id: str) -> str:
+@tool(context=True)
+def consultar_citas_usuario(
+    usuario_id: str,
+    tool_context: ToolContext | None = None,
+) -> str:
     """Lista las citas activas (programadas) de un usuario.
 
     Args:
@@ -555,10 +575,13 @@ def consultar_citas_usuario(usuario_id: str) -> str:
     Returns:
         JSON con la lista de citas: cita_id, fecha, hora, medico, especialidad, estado, sede.
     """
-    log_event("TOOLS", "EXEC", "info", f"Ejecutando consultar_citas_usuario(usuario_id={usuario_id})")
-
-    if not usuario_id:
-        return json.dumps({"ok": False, "error": "Necesito el usuario_id para buscar sus citas."}, ensure_ascii=False)
+    verified_usuario_id = _verified_usuario_id(tool_context)
+    if not verified_usuario_id:
+        return json.dumps(
+            {"ok": False, "error": "No hay una identidad autenticada para consultar tus citas."},
+            ensure_ascii=False,
+        )
+    log_event("TOOLS", "EXEC", "info", "Ejecutando consultar_citas_usuario con identidad verificada")
 
     citas_url = _obtener_citas_service_url()
     if not citas_url:
@@ -568,7 +591,7 @@ def consultar_citas_usuario(usuario_id: str) -> str:
     t0 = time.time()
     try:
         with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
-            url = f"{citas_url}/citas/usuario/{usuario_id}"
+            url = f"{citas_url}/citas/usuario/{verified_usuario_id}"
             response = client.get(url, headers=headers)
             elapsed = round((time.time() - t0) * 1000)
             if 200 <= response.status_code < 300:
@@ -592,8 +615,14 @@ def consultar_citas_usuario(usuario_id: str) -> str:
         return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
 
 
-@tool
-def reagendar_cita(usuario_id: str, cita_id: str, nueva_fecha: str, nueva_hora: str) -> str:
+@tool(context=True)
+def reagendar_cita(
+    usuario_id: str,
+    cita_id: str,
+    nueva_fecha: str,
+    nueva_hora: str,
+    tool_context: ToolContext | None = None,
+) -> str:
     """Reprograma una cita existente a una nueva fecha y hora.
 
     Args:
@@ -605,9 +634,15 @@ def reagendar_cita(usuario_id: str, cita_id: str, nueva_fecha: str, nueva_hora: 
     Returns:
         JSON con la confirmación o error.
     """
+    verified_usuario_id = _verified_usuario_id(tool_context)
+    if not verified_usuario_id:
+        return json.dumps(
+            {"ok": False, "error": "No hay una identidad autenticada para reprogramar citas."},
+            ensure_ascii=False,
+        )
     log_event("TOOLS", "EXEC", "info", f"Ejecutando reagendar_cita(cita_id={cita_id}, fecha={nueva_fecha}, hora={nueva_hora})")
 
-    campos_requeridos = {"usuario_id": usuario_id, "cita_id": cita_id, "nueva_fecha": nueva_fecha, "nueva_hora": nueva_hora}
+    campos_requeridos = {"cita_id": cita_id, "nueva_fecha": nueva_fecha, "nueva_hora": nueva_hora}
     faltantes = [n for n, v in campos_requeridos.items() if not v]
     if faltantes:
         return json.dumps({"ok": False, "error": f"Faltan parametros: {', '.join(faltantes)}."}, ensure_ascii=False)
@@ -623,7 +658,7 @@ def reagendar_cita(usuario_id: str, cita_id: str, nueva_fecha: str, nueva_hora: 
         "nueva_hora_fin": nueva_hora_fin,
         "motivo": "Reprogramacion por asistente virtual",
     }
-    headers = {"Content-Type": "application/json", "X-User-ID": str(usuario_id)}
+    headers = {"Content-Type": "application/json", "X-User-ID": verified_usuario_id}
 
     t0 = time.time()
     try:
@@ -659,8 +694,13 @@ def reagendar_cita(usuario_id: str, cita_id: str, nueva_fecha: str, nueva_hora: 
         return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
 
 
-@tool
-def cancelar_cita(usuario_id: str, cita_id: str, motivo: str = "") -> str:
+@tool(context=True)
+def cancelar_cita(
+    usuario_id: str,
+    cita_id: str,
+    motivo: str = "",
+    tool_context: ToolContext | None = None,
+) -> str:
     """Cancela una cita médica existente.
 
     Args:
@@ -671,17 +711,23 @@ def cancelar_cita(usuario_id: str, cita_id: str, motivo: str = "") -> str:
     Returns:
         JSON con la confirmación o error.
     """
+    verified_usuario_id = _verified_usuario_id(tool_context)
+    if not verified_usuario_id:
+        return json.dumps(
+            {"ok": False, "error": "No hay una identidad autenticada para cancelar citas."},
+            ensure_ascii=False,
+        )
     log_event("TOOLS", "EXEC", "info", f"Ejecutando cancelar_cita(cita_id={cita_id})")
 
-    if not usuario_id or not cita_id:
-        return json.dumps({"ok": False, "error": "Necesito usuario_id y cita_id para cancelar."}, ensure_ascii=False)
+    if not cita_id:
+        return json.dumps({"ok": False, "error": "Necesito el cita_id para cancelar."}, ensure_ascii=False)
 
     citas_url = _obtener_citas_service_url()
     if not citas_url:
         return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
 
     payload = {"motivo": motivo or "Cancelacion por asistente virtual"}
-    headers = {"Content-Type": "application/json", "X-User-ID": str(usuario_id)}
+    headers = {"Content-Type": "application/json", "X-User-ID": verified_usuario_id}
 
     t0 = time.time()
     try:
