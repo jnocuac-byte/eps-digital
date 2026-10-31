@@ -355,7 +355,7 @@ def actualizar_cita(
 def cancelar_cita_endpoint(
 	cita_id: UUID,
 	payload: CancelarCitaRequest,
-	x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+	x_user_id: str = Header(alias="X-User-ID"),
 	db: Session = Depends(get_db),
 ) -> CitaResponse:
 	"""Cancela una cita si cumple reglas de negocio."""
@@ -403,7 +403,7 @@ def cambiar_estado_cita_endpoint(
 def reprogramar_cita_endpoint(
 	cita_id: UUID,
 	payload: ReprogramarCitaRequest,
-	x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+	x_user_id: str = Header(alias="X-User-ID"),
 	db: Session = Depends(get_db),
 ) -> CitaResponse:
 	"""Reprograma una cita validando disponibilidad."""

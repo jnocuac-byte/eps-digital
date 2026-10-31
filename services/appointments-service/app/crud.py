@@ -467,7 +467,9 @@ def cancelar_cita(db: Session, cita_id: UUID, motivo: str | None, realizado_por:
 	"""Cancela una cita solo si esta programada y registra historial."""
 	log_event("CITAS", "CANCEL", "info", f"Cancelando cita={cita_id}, motivo={motivo}")
 	cita = get_cita_by_id(db, cita_id)
-	if not cita:
+	# Propiedad de la cita (PR4b): mismo mensaje que "no encontrada" para no
+	# revelar la existencia de citas ajenas al usuario que hace la peticion.
+	if not cita or str(cita.usuario_id) != str(realizado_por):
 		raise ValueError(f"No existe cita con id {cita_id}")
 
 	if cita.estado != "programada":
@@ -552,7 +554,9 @@ def reprogramar_cita(
 	"""Reprograma una cita programada validando disponibilidad y registrando historial."""
 	log_event("CITAS", "RESCHEDULE", "info", f"Reprogramar cita={cita_id}, nueva_fecha={nueva_fecha}")
 	cita = get_cita_by_id(db, cita_id)
-	if not cita:
+	# Propiedad de la cita (PR4b): mismo mensaje que "no encontrada" para no
+	# revelar la existencia de citas ajenas al usuario que hace la peticion.
+	if not cita or str(cita.usuario_id) != str(realizado_por):
 		raise ValueError(f"No existe cita con id {cita_id}")
 
 	if cita.estado != "programada":
