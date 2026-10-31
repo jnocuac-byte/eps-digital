@@ -89,7 +89,7 @@ class _Client:
         return _Response()
 
 
-def test_legacy_user_id_argument_is_ignored_by_citation_tools(monkeypatch):
+def test_citation_tools_use_only_verified_identity(monkeypatch):
     verified_id = str(uuid4())
     context = type(
         "Context",
@@ -113,21 +113,19 @@ def test_legacy_user_id_argument_is_ignored_by_citation_tools(monkeypatch):
     assert listed["ok"] is True
     assert client.last_request[1].endswith(f"/citas/usuario/{verified_id}")
 
-    tools.reagendar_cita.__wrapped__(
-        "attacker-id",
-        str(uuid4()),
-        "2026-11-02",
-        "09:00",
-        tool_context=context,
+    # Las tools nuevas NO reciben usuario_id del LLM: consultan y proponen
+    # siempre con la identidad verificada del TurnContext.
+    json.loads(
+        tools.proponer_cancelacion.__wrapped__("la de mañana", tool_context=context)
     )
-    assert client.last_request[3]["X-User-ID"] == verified_id
+    assert client.last_request[1].endswith(f"/citas/usuario/{verified_id}")
 
-    tools.cancelar_cita.__wrapped__(
-        "attacker-id",
-        str(uuid4()),
-        tool_context=context,
+    json.loads(
+        tools.proponer_reagendamiento.__wrapped__(
+            "la de mañana", "2026-11-02", "09:00", tool_context=context
+        )
     )
-    assert client.last_request[3]["X-User-ID"] == verified_id
+    assert client.last_request[1].endswith(f"/citas/usuario/{verified_id}")
 
 
 def test_citation_tools_require_verified_identity():
@@ -135,17 +133,11 @@ def test_citation_tools_require_verified_identity():
     assert "identidad autenticada" in tools.consultar_citas_usuario.__wrapped__(
         "attacker-id", tool_context=context
     )
-    assert "identidad autenticada" in tools.reagendar_cita.__wrapped__(
-        "attacker-id",
-        str(uuid4()),
-        "2026-11-02",
-        "09:00",
-        tool_context=context,
+    assert "identidad autenticada" in tools.proponer_cancelacion.__wrapped__(
+        "la de mañana", tool_context=context
     )
-    assert "identidad autenticada" in tools.cancelar_cita.__wrapped__(
-        "attacker-id",
-        str(uuid4()),
-        tool_context=context,
+    assert "identidad autenticada" in tools.proponer_reagendamiento.__wrapped__(
+        "la de mañana", "2026-11-02", "09:00", tool_context=context
     )
 
 

@@ -22,6 +22,12 @@ from ..core.conversation_state import BookingDraft, CancelDraft, RescheduleDraft
 CITAS_TIMEOUT_SECONDS = 4.0
 CATALOG_CACHE_TTL_SECONDS = 10 * 60
 
+# Campos id que NUNCA salen hacia el LLM en las respuestas de tools (PR4):
+# el modelo trabaja con fechas, horas, estados y nombres, jamas con UUIDs.
+_CAMPOS_ID_PROHIBIDOS_LLM = frozenset(
+    {"cita_id", "usuario_id", "medico_id", "sede_id", "especialidad_id"}
+)
+
 
 class _TtlCache:
     """Cache process-local y thread-safe para respuestas de catalogo."""
@@ -1133,7 +1139,9 @@ def consultar_citas_usuario(
         usuario_id: UUID del usuario.
 
     Returns:
-        JSON con la lista de citas: cita_id, fecha, hora, medico, especialidad, estado, sede.
+        JSON con la lista de citas (fecha, hora, tipo de servicio, estado)
+        SIN campos id: ningun UUID (cita, usuario, medico, sede o
+        especialidad) sale hacia el LLM (PR4).
     """
     verified_usuario_id = _verified_usuario_id(tool_context)
     if not verified_usuario_id:
@@ -1156,8 +1164,19 @@ def consultar_citas_usuario(
             elapsed = round((time.time() - t0) * 1000)
             if 200 <= response.status_code < 300:
                 todas = response.json()
-                # Filtrar solo citas programadas (activas)
-                programadas = [c for c in todas if c.get("estado") == "programada"]
+                # Solo citas programadas (activas) y SIN campos id: ningun
+                # UUID sale hacia el LLM (PR4). CitaResponse del backend
+                # trae cita_id, usuario_id, medico_id, sede_id y
+                # especialidad_id.
+                programadas = [
+                    {
+                        campo: valor
+                        for campo, valor in c.items()
+                        if campo not in _CAMPOS_ID_PROHIBIDOS_LLM
+                    }
+                    for c in todas
+                    if isinstance(c, dict) and c.get("estado") == "programada"
+                ]
                 log_event("TOOLS", "HTTP", "debug", f"Citas usuario {usuario_id} -> {len(programadas)} activas ({elapsed}ms)")
                 return json.dumps({
                     "ok": True,
@@ -1175,149 +1194,252 @@ def consultar_citas_usuario(
         return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
 
 
-@tool(context=True)
-def reagendar_cita(
-    usuario_id: str,
-    cita_id: str,
-    nueva_fecha: str,
-    nueva_hora: str,
-    tool_context: ToolContext | None = None,
-) -> str:
-    """Reprograma una cita existente a una nueva fecha y hora.
+# ---------------------------------------------------------------------------
+# Tools de propuesta de cancelar/reagendar (PR4, paso 5): NO ejecutan nada.
+# Resuelven la cita por referencia textual, validan el cupo (reagendar) y
+# guardan el draft via turn_context.set_draft; la ejecucion la hace despues
+# el orquestador tras el "si" determinista. El LLM no recibe ni envia
+# cita_id ni usuario_id: la identidad sale del TurnContext verificado.
+# ---------------------------------------------------------------------------
 
-    Args:
-        usuario_id: UUID del usuario (requerido para header X-User-ID).
-        cita_id: UUID de la cita a reprogramar.
-        nueva_fecha: Nueva fecha en formato YYYY-MM-DD.
-        nueva_hora: Nueva hora en formato HH:MM (24h).
+
+def _ahora_bogota() -> datetime:
+    """Fecha y hora actuales en America/Bogota (Render corre en UTC)."""
+    return datetime.now(ZoneInfo("America/Bogota"))
+
+
+def _hoy_bogota() -> date:
+    """Fecha de hoy en America/Bogota (Render corre en UTC: date.today() desfasa)."""
+    return _ahora_bogota().date()
+
+
+def _validar_nueva_fecha_hora(fecha: str, hora: str, ahora: datetime) -> str | None:
+    """Valida formato y futuriedad de la nueva fecha/hora de reagendamiento.
+
+    `ahora` se inyecta (fecha/hora ya convertidas a America/Bogota) para
+    poder testear sin reloj real.
 
     Returns:
-        JSON con la confirmación o error.
+        Mensaje de error apto para el usuario, o None si todo va bien.
     """
-    verified_usuario_id = _verified_usuario_id(tool_context)
-    if not verified_usuario_id:
-        return json.dumps(
-            {"ok": False, "error": "No hay una identidad autenticada para reprogramar citas."},
-            ensure_ascii=False,
-        )
-    log_event("TOOLS", "EXEC", "info", f"Ejecutando reagendar_cita(cita_id={cita_id}, fecha={nueva_fecha}, hora={nueva_hora})")
-
-    campos_requeridos = {"cita_id": cita_id, "nueva_fecha": nueva_fecha, "nueva_hora": nueva_hora}
-    faltantes = [n for n, v in campos_requeridos.items() if not v]
-    if faltantes:
-        return json.dumps({"ok": False, "error": f"Faltan parametros: {', '.join(faltantes)}."}, ensure_ascii=False)
-
-    citas_url = _obtener_citas_service_url()
-    if not citas_url:
-        return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
-
-    nueva_hora_fin = _sumar_minutos_a_hora(nueva_hora, 30)
-    payload = {
-        "nueva_fecha": nueva_fecha,
-        "nueva_hora_inicio": nueva_hora,
-        "nueva_hora_fin": nueva_hora_fin,
-        "motivo": "Reprogramacion por asistente virtual",
-    }
-    headers = {"Content-Type": "application/json", "X-User-ID": verified_usuario_id}
-
-    t0 = time.time()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(fecha)):
+        return "La fecha debe tener el formato YYYY-MM-DD (ejemplo: 2026-11-05)."
     try:
-        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
-            url = f"{citas_url}/citas/{cita_id}/reprogramar"
-            response = client.post(url, json=payload, headers=headers)
-            elapsed = round((time.time() - t0) * 1000)
-            if 200 <= response.status_code < 300:
-                data = response.json()
-                log_event("TOOLS", "HTTP", "debug", f"Reprogramar cita {cita_id} -> OK ({elapsed}ms)")
-                return json.dumps({
-                    "ok": True,
-                    "cita_id": str(data.get("cita_id", "")),
-                    "nueva_fecha": nueva_fecha,
-                    "nueva_hora": nueva_hora,
-                    "estado": data.get("estado", "programada"),
-                    "mensaje": "Cita reprogramada correctamente!",
-                }, ensure_ascii=False)
-            error_msg = "No pude reprogramar la cita."
-            try:
-                detail = response.json().get("detail", "")
-                if detail:
-                    error_msg = detail
-            except Exception:
-                pass
-            log_event("TOOLS", "HTTP", "warning", f"Reprogramar cita {cita_id} -> {response.status_code} ({elapsed}ms)")
-            return json.dumps({"ok": False, "error": error_msg}, ensure_ascii=False)
-    except httpx.TimeoutException:
-        return json.dumps({"ok": False, "error": "La solicitud tardo demasiado."}, ensure_ascii=False)
-    except httpx.RequestError:
-        return json.dumps({"ok": False, "error": "Problema de conexion."}, ensure_ascii=False)
-    except Exception:
-        return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
+        fecha_nueva = date.fromisoformat(fecha)
+    except ValueError:
+        return "La fecha debe ser una fecha valida en formato YYYY-MM-DD (ejemplo: 2026-11-05)."
+    if not re.fullmatch(r"\d{2}:\d{2}", str(hora)):
+        return "La hora debe tener el formato HH:MM en 24 horas (ejemplo: 15:30)."
+    try:
+        hora_nueva = datetime.strptime(hora, "%H:%M").time()
+    except ValueError:
+        return "La hora debe ser una hora valida en formato HH:MM (ejemplo: 15:30)."
+
+    hoy = ahora.date()
+    if fecha_nueva < hoy:
+        return f"La fecha {fecha} ya paso. Elige una fecha futura."
+    if fecha_nueva == hoy and hora_nueva <= ahora.time():
+        return (
+            f"La hora {hora} de hoy ya paso. "
+            f"Elige una hora posterior a las {ahora.strftime('%H:%M')}."
+        )
+    return None
+
+
+def _duracion_especialidad(especialidad_id: str) -> int:
+    """duracion_cita_minutos del catalogo (cache TTL); 30 solo si no viene."""
+    if especialidad_id:
+        result = _consultar_catalog_service_cached("/especialidades")
+        if result.get("ok"):
+            for especialidad in result.get("data") or []:
+                if str(especialidad.get("especialidad_id")) == str(especialidad_id):
+                    try:
+                        duracion = int(especialidad.get("duracion_cita_minutos"))
+                    except (TypeError, ValueError):
+                        return 30
+                    return duracion if duracion > 0 else 30
+    return 30
 
 
 @tool(context=True)
-def cancelar_cita(
-    usuario_id: str,
-    cita_id: str,
-    motivo: str = "",
+def proponer_cancelacion(
+    referencia: str,
     tool_context: ToolContext | None = None,
 ) -> str:
-    """Cancela una cita médica existente.
+    """Propone cancelar la cita activa que coincida con la referencia textual.
 
     Args:
-        usuario_id: UUID del usuario (requerido para header X-User-ID).
-        cita_id: UUID de la cita a cancelar.
-        motivo: Motivo opcional de la cancelación.
+        referencia: Descripcion de la cita a cancelar en lenguaje natural
+            (fecha, hora, medico o sede), sin ids.
 
     Returns:
-        JSON con la confirmación o error.
+        JSON minimo {"ok", "propuesta_creada", "accion"} cuando hay UNA
+        coincidencia (guarda el draft; no expone datos de la cita). Con 0 o
+        varias coincidencias devuelve una aclaracion sin ids y sin draft.
     """
-    verified_usuario_id = _verified_usuario_id(tool_context)
-    if not verified_usuario_id:
+    usuario_id = _verified_usuario_id(tool_context)
+    resultado = _resolver_cita_usuario(referencia, usuario_id, _hoy_bogota())
+    if not resultado.get("ok") or not resultado.get("encontrada"):
+        # Sin identidad, fallo de servicio, 0 o varias coincidencias: sin draft.
+        return json.dumps(resultado, ensure_ascii=False)
+
+    turn_context = (
+        tool_context.invocation_state if tool_context else {}
+    ).get("turn_context")
+    if turn_context is None:
         return json.dumps(
-            {"ok": False, "error": "No hay una identidad autenticada para cancelar citas."},
+            {"ok": False, "error": "No hay contexto de conversación para guardar la propuesta."},
             ensure_ascii=False,
         )
-    log_event("TOOLS", "EXEC", "info", f"Ejecutando cancelar_cita(cita_id={cita_id})")
 
-    if not cita_id:
-        return json.dumps({"ok": False, "error": "Necesito el cita_id para cancelar."}, ensure_ascii=False)
+    cita = resultado["cita"]
+    draft = CancelDraft(
+        cita_id=str(cita.get("cita_id", "")),
+        usuario_id=usuario_id or "",
+        fecha=str(cita.get("fecha_cita", ""))[:10],
+        hora_inicio=str(cita.get("hora_inicio", ""))[:5],
+        hora_fin=str(cita.get("hora_fin", ""))[:5],
+        medico_id=str(cita.get("medico_id", "")),
+        medico_nombre=str(cita.get("medico_nombre", "")),
+        sede_id=str(cita.get("sede_id", "")),
+        sede_nombre=str(cita.get("sede_nombre", "")),
+        especialidad_nombre=str(cita.get("especialidad_nombre", "")),
+    )
+    turn_context.set_draft(draft, "cancelar")
+    return json.dumps(
+        {"ok": True, "propuesta_creada": True, "accion": "cancelar"},
+        ensure_ascii=False,
+    )
 
+
+@tool(context=True)
+def proponer_reagendamiento(
+    referencia: str,
+    fecha: str,
+    hora: str,
+    tool_context: ToolContext | None = None,
+) -> str:
+    """Propone reprogramar la cita activa que coincida con la referencia.
+
+    Args:
+        referencia: Descripcion de la cita actual en lenguaje natural, sin ids.
+        fecha: Nueva fecha en formato YYYY-MM-DD.
+        hora: Nueva hora de inicio en formato HH:MM (24h).
+
+    Returns:
+        JSON minimo {"ok", "propuesta_creada", "accion"} cuando hay UNA
+        coincidencia, la nueva fecha/hora es futura (America/Bogota) y el
+        cupo existe (guarda el draft; no expone datos de la cita). Con
+        fecha/hora invalidas o pasadas, 0 o varias coincidencias, o sin
+        cupo, devuelve un mensaje sin ids y sin draft.
+    """
+    usuario_id = _verified_usuario_id(tool_context)
+    # Validar formato (YYYY-MM-DD / HH:MM) y futuriedad en America/Bogota
+    # ANTES de cualquier llamada HTTP: la fecha pasada no debe morir en el
+    # backend ni tras mostrar el "¿Confirmas?" al usuario.
+    error_fecha_hora = _validar_nueva_fecha_hora(fecha, hora, _ahora_bogota())
+    if error_fecha_hora:
+        return json.dumps({"ok": False, "error": error_fecha_hora}, ensure_ascii=False)
+    resultado = _resolver_cita_usuario(referencia, usuario_id, _hoy_bogota())
+    if not resultado.get("ok") or not resultado.get("encontrada"):
+        # Sin identidad, fallo de servicio, 0 o varias coincidencias: sin draft.
+        return json.dumps(resultado, ensure_ascii=False)
+    cita = resultado["cita"]
+
+    # Reagendar a la MISMA fecha y hora actual de la cita: sin draft.
+    fecha_original = str(cita.get("fecha_cita", ""))[:10]
+    hora_original = str(cita.get("hora_inicio", ""))[:5]
+    if str(fecha)[:10] == fecha_original and str(hora)[:5] == hora_original:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": (
+                    f"Ya tienes esa cita programada el {fecha_original} "
+                    f"a las {hora_original}. Elige otra fecha u hora."
+                ),
+            },
+            ensure_ascii=False,
+        )
+
+    turn_context = (
+        tool_context.invocation_state if tool_context else {}
+    ).get("turn_context")
+    if turn_context is None:
+        return json.dumps(
+            {"ok": False, "error": "No hay contexto de conversación para guardar la propuesta."},
+            ensure_ascii=False,
+        )
+
+    # Validar el cupo nuevo contra /citas/slots-detallados (como proponer_cita)
+    # del MEDICO de la cita: reprogramar conserva medico y sede.
     citas_url = _obtener_citas_service_url()
     if not citas_url:
         return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
-
-    payload = {"motivo": motivo or "Cancelacion por asistente virtual"}
-    headers = {"Content-Type": "application/json", "X-User-ID": verified_usuario_id}
-
-    t0 = time.time()
     try:
         with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
-            url = f"{citas_url}/citas/{cita_id}/cancelar"
-            response = client.post(url, json=payload, headers=headers)
-            elapsed = round((time.time() - t0) * 1000)
-            if 200 <= response.status_code < 300:
-                log_event("TOOLS", "HTTP", "debug", f"Cancelar cita {cita_id} -> OK ({elapsed}ms)")
-                return json.dumps({
-                    "ok": True,
-                    "cita_id": str(cita_id),
-                    "estado": "cancelada",
-                    "mensaje": "Cita cancelada correctamente.",
-                }, ensure_ascii=False)
-            error_msg = "No pude cancelar la cita."
-            try:
-                detail = response.json().get("detail", "")
-                if detail:
-                    error_msg = detail
-            except Exception:
-                pass
-            log_event("TOOLS", "HTTP", "warning", f"Cancelar cita {cita_id} -> {response.status_code} ({elapsed}ms)")
-            return json.dumps({"ok": False, "error": error_msg}, ensure_ascii=False)
-    except httpx.TimeoutException:
-        return json.dumps({"ok": False, "error": "La solicitud tardo demasiado."}, ensure_ascii=False)
-    except httpx.RequestError:
-        return json.dumps({"ok": False, "error": "Problema de conexion."}, ensure_ascii=False)
-    except Exception:
-        return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
+            response = client.get(
+                f"{citas_url}/citas/slots-detallados",
+                params={"medico_id": cita.get("medico_id"), "fecha": fecha},
+                headers={"Content-Type": "application/json"},
+            )
+        if not 200 <= response.status_code < 300:
+            return json.dumps({"ok": False, "error": "No pude consultar los cupos para esa fecha."}, ensure_ascii=False)
+        slots = response.json()
+    except (httpx.RequestError, httpx.TimeoutException):
+        return json.dumps({"ok": False, "error": "Problema de conexión al consultar los cupos."}, ensure_ascii=False)
+    except ValueError:
+        return json.dumps({"ok": False, "error": "Respuesta invalida al consultar los cupos."}, ensure_ascii=False)
+
+    hora_inicio_nueva = str(hora)[:5]
+    opciones = [
+        slot
+        for slot in slots or []
+        if isinstance(slot, dict)
+        and str(slot.get("hora_inicio", ""))[:5] == hora_inicio_nueva
+        and (
+            not cita.get("sede_id")
+            or str(slot.get("sede_id")) == str(cita.get("sede_id"))
+        )
+    ]
+    if not opciones:
+        sede_nombre = str(cita.get("sede_nombre", "")).strip()
+        detalle_sede = (
+            f" en la sede de tu cita ({sede_nombre})"
+            if sede_nombre
+            else " en la sede de tu cita"
+        )
+        return json.dumps(
+            {
+                "ok": False,
+                "error": (
+                    f"No encontre un cupo disponible el {fecha} a las "
+                    f"{hora_inicio_nueva}{detalle_sede}."
+                ),
+            },
+            ensure_ascii=False,
+        )
+
+    duracion = _duracion_especialidad(str(cita.get("especialidad_id", "")))
+    draft = RescheduleDraft(
+        cita_id=str(cita.get("cita_id", "")),
+        usuario_id=usuario_id or "",
+        fecha_original=str(cita.get("fecha_cita", ""))[:10],
+        hora_inicio_original=str(cita.get("hora_inicio", ""))[:5],
+        hora_fin_original=str(cita.get("hora_fin", ""))[:5],
+        medico_id=str(cita.get("medico_id", "")),
+        medico_nombre=str(cita.get("medico_nombre", "")),
+        sede_id=str(cita.get("sede_id", "")),
+        sede_nombre=str(cita.get("sede_nombre", "")),
+        especialidad_nombre=str(cita.get("especialidad_nombre", "")),
+        nueva_fecha=str(fecha)[:10],
+        nueva_hora_inicio=hora_inicio_nueva,
+        nueva_hora_fin=_sumar_minutos_a_hora(hora_inicio_nueva, duracion),
+    )
+    turn_context.set_draft(draft, "reagendar")
+    return json.dumps(
+        {"ok": True, "propuesta_creada": True, "accion": "reagendar"},
+        ensure_ascii=False,
+    )
 
 
 SCHEDULING_TOOLS = [
@@ -1327,6 +1449,6 @@ SCHEDULING_TOOLS = [
     buscar_opciones_cita,
     proponer_cita,
     consultar_citas_usuario,
-    reagendar_cita,
-    cancelar_cita,
+    proponer_cancelacion,
+    proponer_reagendamiento,
 ]
