@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import unicodedata
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from threading import RLock
 from typing import Any
 from uuid import UUID
@@ -16,7 +17,7 @@ from strands import tool
 from strands.types.tools import ToolContext
 
 from ..core.logger import log_event
-from ..core.conversation_state import BookingDraft
+from ..core.conversation_state import BookingDraft, CancelDraft, RescheduleDraft
 
 CITAS_TIMEOUT_SECONDS = 4.0
 CATALOG_CACHE_TTL_SECONDS = 10 * 60
@@ -436,6 +437,144 @@ def _buscar_cita_existente(draft: BookingDraft) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Ejecutores normales (PR4, paso 4): funciones puras SIN @tool, invocadas por
+# el orquestador solo tras la confirmacion determinista "si". No tocan el
+# draft (los fallos dejan el estado para reintentar) y NINGUNA salida contiene
+# UUIDs ni el detalle crudo del backend (que puede incluir el cita_id).
+# ---------------------------------------------------------------------------
+
+
+def _detalle_de_error(response: httpx.Response) -> str:
+    """Solo el campo `detail` (str) de la respuesta; nunca se usa como salida."""
+    try:
+        data = response.json()
+    except ValueError:
+        return ""
+    if isinstance(data, dict) and isinstance(data.get("detail"), str):
+        return data["detail"]
+    return ""
+
+
+def ejecutar_cancelacion_desde_draft(
+    draft: CancelDraft, usuario_id: str
+) -> dict[str, Any]:
+    """Cancela la cita del draft validado: POST /citas/{cita_id}/cancelar.
+
+    Devuelve {"ok": True}, {"ok": True, "ya_cancelada": True} si la cita ya no
+    estaba programada (idempotente), o {"ok": False, "error": ...}. No modifica
+    el draft y no expone UUIDs.
+    """
+    cita_id = str(getattr(draft, "cita_id", "") or "").strip()
+    if not cita_id:
+        return {"ok": False, "error": "No tengo una cita valida para cancelar."}
+    if not usuario_id:
+        return {"ok": False, "error": "No hay una identidad autenticada para gestionar tus citas."}
+
+    log_event("TOOLS", "EXEC", "info", "Cancelando cita desde draft")
+    citas_url = _obtener_citas_service_url()
+    if not citas_url:
+        return {"ok": False, "error": "CITAS_SERVICE_URL no configurado."}
+
+    payload = {"motivo": draft.motivo or None}
+    headers = {"Content-Type": "application/json", "X-User-ID": usuario_id}
+
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            response = client.post(
+                f"{citas_url}/citas/{cita_id}/cancelar", json=payload, headers=headers
+            )
+    except httpx.TimeoutException:
+        return {"ok": False, "error": "La solicitud tardo demasiado."}
+    except httpx.RequestError:
+        return {"ok": False, "error": "Problema de conexion."}
+    except Exception:
+        return {"ok": False, "error": "Error inesperado."}
+
+    if 200 <= response.status_code < 300:
+        return {"ok": True}
+
+    detalle = _detalle_de_error(response)
+    if "Solo se puede cancelar una cita en estado 'programada'" in detalle:
+        # Ya no estaba programada: cancelar de nuevo es exito idempotente.
+        return {"ok": True, "ya_cancelada": True}
+    if response.status_code == 404 or "No existe cita" in detalle:
+        return {"ok": False, "error": "No encontre esa cita para cancelarla."}
+    if response.status_code >= 500:
+        return {"ok": False, "error": "El servicio de citas no respondio correctamente."}
+    return {"ok": False, "error": "No pude cancelar la cita."}
+
+
+def ejecutar_reagendamiento_desde_draft(
+    draft: RescheduleDraft, usuario_id: str
+) -> dict[str, Any]:
+    """Reprograma la cita del draft: POST /citas/{cita_id}/reprogramar (atomico).
+
+    Distingue: {"ok": True} | {"ok": False, "cupo_no_disponible": True} |
+    {"ok": False, "cita_cambio": True} | {"ok": False, "error": ...} (fallo
+    transitorio, sin banderas). No modifica el draft y no expone UUIDs.
+    """
+    cita_id = str(getattr(draft, "cita_id", "") or "").strip()
+    if not cita_id:
+        return {"ok": False, "error": "No tengo una cita valida para reprogramar."}
+    if not usuario_id:
+        return {"ok": False, "error": "No hay una identidad autenticada para gestionar tus citas."}
+
+    log_event("TOOLS", "EXEC", "info", "Reprogramando cita desde draft")
+    citas_url = _obtener_citas_service_url()
+    if not citas_url:
+        return {"ok": False, "error": "CITAS_SERVICE_URL no configurado."}
+
+    payload = {
+        "nueva_fecha": draft.nueva_fecha,
+        "nueva_hora_inicio": draft.nueva_hora_inicio,
+        "nueva_hora_fin": draft.nueva_hora_fin,
+    }
+    headers = {"Content-Type": "application/json", "X-User-ID": usuario_id}
+
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            response = client.post(
+                f"{citas_url}/citas/{cita_id}/reprogramar",
+                json=payload,
+                headers=headers,
+            )
+    except httpx.TimeoutException:
+        return {"ok": False, "error": "La solicitud tardo demasiado."}
+    except httpx.RequestError:
+        return {"ok": False, "error": "Problema de conexion."}
+    except Exception:
+        return {"ok": False, "error": "Error inesperado."}
+
+    if 200 <= response.status_code < 300:
+        return {"ok": True}
+
+    detalle = _detalle_de_error(response)
+    if (
+        "ya tiene una cita programada" in detalle
+        or "ocupad" in detalle.lower()
+        or "no disponible" in detalle.lower()
+    ):
+        return {
+            "ok": False,
+            "cupo_no_disponible": True,
+            "error": "Ese horario ya esta ocupado; elige otra fecha u hora.",
+        }
+    if (
+        response.status_code == 404
+        or "No existe cita" in detalle
+        or "Solo se puede reprogramar una cita en estado 'programada'" in detalle
+    ):
+        return {
+            "ok": False,
+            "cita_cambio": True,
+            "error": "Tu cita cambio o ya no esta programada.",
+        }
+    if response.status_code >= 500:
+        return {"ok": False, "error": "El servicio de citas no respondio correctamente."}
+    return {"ok": False, "error": "No pude reprogramar la cita."}
+
+
 def _normalizar_texto(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     return "".join(
@@ -452,6 +591,427 @@ def _tipo_servicio_desde_especialidad(nombre: str) -> str:
     if "general" in normalized:
         return "medicina_general"
     return "especialista"
+
+
+# ---------------------------------------------------------------------------
+# Resolucion de citas del usuario por referencia textual (PR4, paso 3).
+#
+# Regla: NADA de lo que sale hacia el LLM lleva cita_id ni otros UUIDs de
+# cita. El cita_id solo se devuelve aqui para uso INTERNO del orquestador
+# (drafts); las salidas de aclaracion son solo campos legibles.
+# ---------------------------------------------------------------------------
+
+_DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_RANGO_DIAS_REFERENCIA = 14
+
+# Palabras funcionales de peticion (no describen la cita): no cuentan como
+# fragmento de busqueda. Los dias/horas/fechas NO usan listas: regex directas.
+_STOPWORDS_REFERENCIA = {
+    "cancela", "cancelar", "cancele", "cancelame", "cancelada", "cancelado",
+    "quiero", "deseo", "puedes", "puede", "favor", "gracias", "hola",
+    "cita", "citas", "reprogramar", "reprograma", "reagendar", "reagenda",
+    "cambiar", "cambia", "mueve", "mover", "mueveme", "hora", "horario",
+    "fecha", "nueva", "nuevo", "otra", "otro", "tengo", "tenemos",
+}
+
+
+def _fecha_legible(fecha_iso: str) -> str:
+    """Fecha ISO -> 'lunes 02/11/2026' (dia en espanol, sin depender del LLM)."""
+    try:
+        parsed = datetime.strptime(str(fecha_iso), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return str(fecha_iso)
+    return f"{_DIAS_SEMANA[parsed.weekday()]} {parsed.strftime('%d/%m/%Y')}"
+
+
+def _parsear_fecha(valor: Any) -> date | None:
+    try:
+        return datetime.strptime(str(valor), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _obtener_citas_activas(usuario_id: str) -> dict[str, Any]:
+    """GET /citas/usuario/{usuario_id} (siempre el VERIFICADO): solo 'programada'."""
+    citas_url = _obtener_citas_service_url()
+    if not citas_url:
+        return {"ok": False, "error": "CITAS_SERVICE_URL no configurado."}
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            response = client.get(
+                f"{citas_url}/citas/usuario/{usuario_id}",
+                headers={"Content-Type": "application/json"},
+            )
+    except httpx.TimeoutException:
+        return {"ok": False, "error": "La consulta tardo demasiado."}
+    except httpx.RequestError:
+        return {"ok": False, "error": "Problema de conexion."}
+    except Exception:
+        return {"ok": False, "error": "Error inesperado."}
+    if not 200 <= response.status_code < 300:
+        return {"ok": False, "error": "No pude consultar tus citas."}
+    try:
+        todas = response.json()
+    except ValueError:
+        return {"ok": False, "error": "Respuesta invalida del servicio de citas."}
+    if not isinstance(todas, list):
+        # Un 200 con dict de error (u otra cosa) no es una lista de citas.
+        return {"ok": False, "error": "Respuesta invalida del servicio de citas."}
+    return {
+        "ok": True,
+        "citas": [c for c in todas if isinstance(c, dict) and c.get("estado") == "programada"],
+    }
+
+
+def _enriquecer_cita(cita: dict[str, Any]) -> dict[str, Any]:
+    """Agrega nombres legibles de medico, sede y especialidad (cache TTL existente).
+
+    Si falta algun nombre usa un texto neutro: nunca se expone un UUID como nombre.
+    """
+    medico_nombre = ""
+    sede_nombre = ""
+    especialidad_nombre = ""
+
+    medico_id = cita.get("medico_id")
+    if medico_id:
+        result = _consultar_catalog_service_cached(f"/medicos/{medico_id}")
+        if result.get("ok"):
+            data = result.get("data") or {}
+            medico_nombre = (
+                f"{data.get('nombres') or ''} {data.get('apellidos') or ''}".strip()
+                or f"{data.get('nombre') or ''} {data.get('apellido') or ''}".strip()
+            )
+
+    sede_id = cita.get("sede_id")
+    if sede_id:
+        result = _consultar_catalog_service_cached("/sedes")
+        if result.get("ok"):
+            for sede in result.get("data") or []:
+                if str(sede.get("sede_id")) == str(sede_id):
+                    sede_nombre = str(sede.get("nombre") or "").strip()
+                    break
+
+    especialidad_id = cita.get("especialidad_id")
+    if especialidad_id:
+        result = _consultar_catalog_service_cached("/especialidades")
+        if result.get("ok"):
+            for especialidad in result.get("data") or []:
+                if str(especialidad.get("especialidad_id")) == str(especialidad_id):
+                    especialidad_nombre = str(especialidad.get("nombre") or "").strip()
+                    break
+
+    return {
+        **cita,
+        "medico_nombre": medico_nombre or "Médico asignado",
+        "sede_nombre": sede_nombre or "Sede",
+        "especialidad_nombre": especialidad_nombre or "Consulta médica",
+    }
+
+
+def _extraer_restricciones(referencia: str, hoy: date) -> dict[str, Any]:
+    """Extrae restricciones ACUMULATIVAS de lo que dijo el usuario.
+
+    Reglas por regex (sin ampliar listas cerradas: la regex es la regla
+    preferida). Cada numero/ palabra reconocido se ENMASCARA del texto para
+    que no se cuele como fragmento:
+
+    - horas exactas HH:MM (tambien con am/pm: "10:30 pm" -> "22:30");
+    - horas por nivel "10am", "10 pm", "10 de la manana/tarde" (horas_definidas);
+    - horas ambiguas "las 10", "a las 7" (sin am/pm): horas_ambiguas, que el
+      resolvedor decide contra hora_inicio de 24h;
+    - fechas ISO y DD/MM;
+    - fechas relativas "hoy", "manana", "pasado manana" (usando `hoy`);
+    - dias de semana.
+    Los fragmentos restantes (medico/sede/especialidad) son NO bloqueantes:
+    se aplican en el resolvedor solo si no vacian el resultado.
+    """
+    texto = _normalizar_texto(referencia or "")
+    restricciones: dict[str, Any] = {
+        "dias": set(),
+        "fechas": set(),
+        "horas": set(),           # exactas "HH:MM"
+        "horas_definidas": set(),  # nivel de hora con am/pm o manana/tarde
+        "horas_ambiguas": set(),  # "las N" sin am/pm: N se decide despues
+        "fragmentos": set(),
+    }
+    if not texto:
+        return restricciones
+
+    def _consumir(patron: str, al_consumir) -> None:
+        """Aplica una regex, ejecuta el callback por match y enmascara el match."""
+
+        def _reemplazo(match: re.Match) -> str:
+            al_consumir(match)
+            return " " * (match.end() - match.start())
+
+        nonlocal texto
+        texto = re.sub(patron, _reemplazo, texto)
+
+    # 1) Horas exactas con am/pm: "10:30 pm" -> 22:30.
+    def _hora_con_meridiano(match: re.Match) -> None:
+        hora = int(match.group(1)) % 12
+        if match.group(3).lower() == "pm":
+            hora += 12
+        restricciones["horas"].add(f"{hora:02d}:{match.group(2)}")
+
+    _consumir(r"\b(\d{1,2}):(\d{2})\s*(am|pm)\b", _hora_con_meridiano)
+
+    # 2) Horas exactas HH:MM.
+    _consumir(
+        r"\b(\d{1,2}):(\d{2})\b",
+        lambda m: restricciones["horas"].add(f"{int(m.group(1)):02d}:{m.group(2)}"),
+    )
+
+    # 3) "10 de la manana" / "7 de la tarde" (tambien con minutos): nivel de hora.
+    def _hora_con_periodo(match: re.Match) -> None:
+        hora = int(match.group(1)) % 12
+        if match.group(3).lower() == "tarde":
+            hora += 12
+        restricciones["horas_definidas"].add(hora)
+
+    _consumir(r"\b(\d{1,2})(?::(\d{2}))?\s+de\s+la\s+(manana|tarde)\b", _hora_con_periodo)
+
+    # 4) "10am" / "10 pm": nivel de hora.
+    def _hora_meridiano_suelto(match: re.Match) -> None:
+        hora = int(match.group(1)) % 12
+        if match.group(2).lower() == "pm":
+            hora += 12
+        restricciones["horas_definidas"].add(hora)
+
+    _consumir(r"\b(\d{1,2})\s*(am|pm)\b", _hora_meridiano_suelto)
+
+    # 5) Fecha ISO.
+    def _fecha_iso(match: re.Match) -> None:
+        try:
+            restricciones["fechas"].add(
+                date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+            )
+        except ValueError:
+            pass
+
+    _consumir(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", _fecha_iso)
+
+    # 6) Fecha DD/MM (opcional anio) ANTES de las horas ambiguas: "las 10/11".
+    def _fecha_dd_mm(match: re.Match) -> None:
+        try:
+            if match.group(3):
+                anio = int(match.group(3))
+                if anio < 100:
+                    anio += 2000
+            else:
+                # Sin anio explicito: primero este anio; si ya paso, el siguiente.
+                candidata = date(hoy.year, int(match.group(2)), int(match.group(1)))
+                anio = hoy.year if candidata >= hoy else hoy.year + 1
+            restricciones["fechas"].add(date(anio, int(match.group(2)), int(match.group(1))))
+        except ValueError:
+            pass
+
+    _consumir(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", _fecha_dd_mm)
+
+    # 7) Horas ambiguas: "las 10", "a las 7" (sin am/pm). El resolvedor mira
+    #    contra hora_inicio con las dos lecturas (7 -> 07:00 y 19:00).
+    _consumir(
+        r"\b(?:a\s+)?las\s+(\d{1,2})\b",
+        lambda m: restricciones["horas_ambiguas"].add(int(m.group(1))),
+    )
+
+    # 8) Fechas relativas con `hoy` (antes que la regla de "manana" suelta:
+    #    "pasado manana" se consume entero, y "10 de la manana" ya se enmascaro).
+    _consumir(
+        r"\bpasado\s+manana\b",
+        lambda _m: restricciones["fechas"].add(hoy + timedelta(days=2)),
+    )
+    _consumir(
+        r"\bmanana\b",
+        lambda _m: restricciones["fechas"].add(hoy + timedelta(days=1)),
+    )
+    _consumir(r"\bhoy\b", lambda _m: restricciones["fechas"].add(hoy))
+
+    # 9) Dias de semana (sobre el texto ya enmascarado).
+    for indice, dia in enumerate(_DIAS_SEMANA):
+        if re.search(rf"\b{_normalizar_texto(dia)}\b", texto):
+            restricciones["dias"].add(indice)
+
+    for palabra in texto.split():
+        if (
+            len(palabra) >= 4
+            and not palabra.isdigit()
+            and ":" not in palabra
+            and palabra not in _STOPWORDS_REFERENCIA
+            and palabra not in {d for d in (_normalizar_texto(x) for x in _DIAS_SEMANA)}
+        ):
+            restricciones["fragmentos"].add(palabra)
+    return restricciones
+
+
+def _hora_de_cita(cita: dict[str, Any]) -> int | None:
+    """Hora (0-23) de hora_inicio 'HH:MM'; None si no es interpretable."""
+    try:
+        return int(str(cita.get("hora_inicio") or "")[:2])
+    except ValueError:
+        return None
+
+
+def _resolver_horas_ambiguas(
+    horas_ambiguas: set[int], candidatas: list[dict[str, Any]]
+) -> set[int] | None:
+    """Decide horas ambiguas ('las 7' -> 7 u 19) contra hora_inicio (24h).
+
+    - Exactamente UNA lectura coincide con alguna candidata -> se restringe a ella.
+    - Las DOS lecturas coinciden -> no se puede decidir: NO se restringe (set()).
+    - NINGUNA lectura coincide -> la hora pedida no existe aqui: 0 coincidencias
+      (retorna None, que el resolvedor traduce a ninguna candidata).
+    """
+    resueltas: set[int] = set()
+    horas_candidatas = {_hora_de_cita(cita) for cita in candidatas} - {None}
+    for ambigua in horas_ambiguas:
+        lecturas = {ambigua % 12, (ambigua % 12) + 12}
+        coincidentes = lecturas & horas_candidatas
+        if len(coincidentes) == 1:
+            resueltas |= coincidentes
+        elif not coincidentes:
+            return None
+    return resueltas
+
+
+def _coincide_con_restricciones(
+    cita: dict[str, Any],
+    restricciones: dict[str, Any],
+    hoy: date,
+    *,
+    aplicar_fragmentos: bool = False,
+    horas_exactas: set[str] | None = None,
+    horas_nivel: set[int] | None = None,
+) -> bool:
+    """True si la cita satisface las restricciones indicadas (todas, AND).
+
+    Los fragmentos solo participan si `aplicar_fragmentos=True` (el resolvedor
+    los aplica como filtro NO bloqueante); las horas se pasan ya resueltas
+    (exactas "HH:MM" y/o nivel entero 0-23).
+    """
+    if aplicar_fragmentos and restricciones["fragmentos"]:
+        texto_cita = _normalizar_texto(
+            f"{cita.get('medico_nombre', '')} {cita.get('sede_nombre', '')} "
+            f"{cita.get('especialidad_nombre', '')}"
+        )
+        if not all(fragmento in texto_cita for fragmento in restricciones["fragmentos"]):
+            return False
+
+    if horas_exactas or horas_nivel:
+        if horas_exactas and str(cita.get("hora_inicio", ""))[:5] not in horas_exactas:
+            return False
+        if horas_nivel:
+            hora = _hora_de_cita(cita)
+            if hora is None or hora not in horas_nivel:
+                return False
+
+    requiere_fecha = bool(restricciones["fechas"] or restricciones["dias"])
+    fecha_cita = _parsear_fecha(cita.get("fecha_cita"))
+    if requiere_fecha and fecha_cita is None:
+        return False
+    if restricciones["fechas"] and fecha_cita not in restricciones["fechas"]:
+        return False
+    if restricciones["dias"]:
+        # Dia de semana: solo se busca desde 'hoy' inclusive, 14 dias, Bogota.
+        if not (hoy <= fecha_cita <= hoy + timedelta(days=_RANGO_DIAS_REFERENCIA - 1)):
+            return False
+        if fecha_cita.weekday() not in restricciones["dias"]:
+            return False
+    return True
+
+
+def _cita_legible(cita: dict[str, Any]) -> dict[str, str]:
+    """Representacion de una cita SIN ids: fecha legible, hora, medico y sede."""
+    return {
+        "fecha": _fecha_legible(cita.get("fecha_cita", "")),
+        "hora": str(cita.get("hora_inicio", ""))[:5],
+        "medico": str(cita.get("medico_nombre", "")),
+        "sede": str(cita.get("sede_nombre", "")),
+        "especialidad": str(cita.get("especialidad_nombre", "")),
+    }
+
+
+def _resolver_cita_usuario(
+    referencia: str, usuario_id: str | None, hoy: date
+) -> dict[str, Any]:
+    """Resuelve cual es "la cita que el usuario quiere gestionar".
+
+    Returns:
+        {"ok": False, "error": ...} si no hay identidad o fallo de servicio;
+        {"ok": True, "encontrada": True, "cita": <cita enriquecida>} con 1
+        coincidencia (el cita_id de 'cita' es de uso INTERNO, jamas se envia
+        al LLM);
+        {"ok": True, "encontrada": False, "candidatas": [<sin ids>], ...} con
+        0 o varias coincidencias: sin draft, aclaracion.
+    """
+    if not usuario_id:
+        return {"ok": False, "error": "No hay una identidad autenticada para gestionar tus citas."}
+
+    resultado = _obtener_citas_activas(usuario_id)
+    if not resultado.get("ok"):
+        return {"ok": False, "error": resultado.get("error") or "No pude consultar tus citas."}
+
+    enriquecidas = [_enriquecer_cita(cita) for cita in resultado["citas"]]
+    restricciones = _extraer_restricciones(referencia, hoy)
+
+    # 1) Restricciones de fecha/dia (sin horas ni fragmentos).
+    por_fecha = [
+        cita
+        for cita in enriquecidas
+        if _coincide_con_restricciones(cita, restricciones, hoy)
+    ]
+
+    # 2) Horas: exactas (HH:MM) + definidas (am/pm) + ambiguas decididas
+    #    contra las candidatas por fecha. Si alguna ambigua no coincide con
+    #    NINGUNA lectura -> 0 candidatas (None); si ambas coinciden -> sin efecto.
+    horas_ambiguas_resueltas = _resolver_horas_ambiguas(
+        restricciones["horas_ambiguas"], por_fecha
+    )
+    if horas_ambiguas_resueltas is None:
+        con_horas = []
+    else:
+        horas_nivel = set(restricciones["horas_definidas"]) | horas_ambiguas_resueltas
+        con_horas = [
+            cita
+            for cita in por_fecha
+            if _coincide_con_restricciones(
+                cita,
+                restricciones,
+                hoy,
+                horas_exactas=restricciones["horas"],
+                horas_nivel=horas_nivel,
+            )
+        ]
+
+    # 3) Fragmentos NO bloqueantes: si dejan 0 y sin ellos quedan >=1, se
+    #    ignoran (nunca vacian el resultado; solo estrechan cuando ayudan).
+    coincidentes = con_horas
+    if restricciones["fragmentos"] and con_horas:
+        con_fragmentos = [
+            cita for cita in con_horas if _coincide_con_restricciones(cita, restricciones, hoy, aplicar_fragmentos=True)
+        ]
+        coincidentes = con_fragmentos or con_horas
+
+    if len(coincidentes) == 1:
+        return {"ok": True, "encontrada": True, "cita": coincidentes[0]}
+    if not coincidentes:
+        return {
+            "ok": True,
+            "encontrada": False,
+            "candidatas": [],
+            "mensaje": "No encontre ninguna cita activa que coincida con lo que me indicas.",
+        }
+    # Varias coincidencias, o referencia sin restricciones con >1 citas activas:
+    # nunca elegir la primera; pedir aclaracion con campos legibles y sin ids.
+    return {
+        "ok": True,
+        "encontrada": False,
+        "candidatas": [_cita_legible(cita) for cita in coincidentes],
+        "mensaje": (
+            "Encontre varias citas que podrian ser la que buscas. "
+            "Dime la fecha, la hora o el medico para elegir una."
+        ),
+    }
 
 
 @tool(context=True)

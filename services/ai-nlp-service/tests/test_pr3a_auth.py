@@ -40,7 +40,9 @@ def test_verify_access_token_accepts_valid_token_and_rejects_invalid_variants(mo
         None,
         "Basic token",
         f"Bearer {_token(exp=datetime.now(timezone.utc) - timedelta(seconds=1))}",
-        f"Bearer {token[:-1]}x",
+        # Tamper determinista: cambia un byte INTERMEDIO de la firma (el ultimo
+        # caracter base64url solo usa 4 bits; cambiarlo podia decodificar igual).
+        f"Bearer {token[:-10]}{'A' if token[-10] != 'A' else 'B'}{token[-9:]}",
         f"Bearer {_token(tipo='refresh')}",
         f"Bearer {_token(usuario_id='not-a-uuid')}",
         f"Bearer {_token(usuario_id='00000000-0000-0000-0000-000000000000')}",
