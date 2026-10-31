@@ -11,6 +11,9 @@ _UUID_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+# Acciones con draft confirmable. Cualquier otro valor persistido se trata como None.
+PENDING_ACTIONS_VALIDAS = {"agendar", "cancelar", "reagendar"}
+
 
 def es_uuid_valido(valor: str) -> bool:
     """Retorna True si el valor es un UUID v4 válido (formato PostgreSQL)."""
@@ -101,8 +104,10 @@ class ConversationState:
     selected_time: str | None = None
     pending_confirmation: bool = False
 
-    pending_action: Literal["agendar"] | None = None
+    pending_action: Literal["agendar", "cancelar", "reagendar"] | None = None
     booking_draft: BookingDraft | None = None
+    cancel_draft: CancelDraft | None = None
+    reschedule_draft: RescheduleDraft | None = None
     last_booking_id: str | None = None
     last_booking_summary: str | None = None
     execution_started_at: str | None = None
@@ -119,6 +124,10 @@ class ConversationState:
         data = asdict(self)
         if self.booking_draft is not None:
             data["booking_draft"] = self.booking_draft.to_dict()
+        if self.cancel_draft is not None:
+            data["cancel_draft"] = self.cancel_draft.to_dict()
+        if self.reschedule_draft is not None:
+            data["reschedule_draft"] = self.reschedule_draft.to_dict()
         return data
 
     @classmethod
@@ -138,8 +147,14 @@ class ConversationState:
             selected_date=data.get("selected_date"),
             selected_time=data.get("selected_time"),
             pending_confirmation=data.get("pending_confirmation", False),
-            pending_action=data.get("pending_action"),
+            pending_action=(
+                data.get("pending_action")
+                if data.get("pending_action") in PENDING_ACTIONS_VALIDAS
+                else None
+            ),
             booking_draft=BookingDraft.from_dict(data["booking_draft"]) if data.get("booking_draft") else None,
+            cancel_draft=CancelDraft.from_dict(data["cancel_draft"]) if data.get("cancel_draft") else None,
+            reschedule_draft=RescheduleDraft.from_dict(data["reschedule_draft"]) if data.get("reschedule_draft") else None,
             last_booking_id=data.get("last_booking_id"),
             last_booking_summary=data.get("last_booking_summary"),
             execution_started_at=data.get("execution_started_at"),
@@ -202,6 +217,90 @@ class BookingDraft:
                 self.hora_inicio,
                 self.hora_fin,
             )
+        )
+
+
+@dataclass
+class CancelDraft:
+    """Datos de una cancelacion pendiente de confirmacion (PR4).
+
+    El cita_id vive SOLO aqui y en los ejecutores del orquestador;
+    nunca se expone ni se recibe del LLM.
+    """
+
+    cita_id: str
+    usuario_id: str
+    fecha: str
+    hora_inicio: str
+    hora_fin: str
+    medico_id: str
+    medico_nombre: str
+    sede_id: str
+    sede_nombre: str
+    especialidad_nombre: str
+    motivo: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CancelDraft":
+        return cls(
+            cita_id=str(data.get("cita_id", "")),
+            usuario_id=str(data.get("usuario_id", "")),
+            fecha=str(data.get("fecha", "")),
+            hora_inicio=str(data.get("hora_inicio", "")),
+            hora_fin=str(data.get("hora_fin", "")),
+            medico_id=str(data.get("medico_id", "")),
+            medico_nombre=str(data.get("medico_nombre", "")),
+            sede_id=str(data.get("sede_id", "")),
+            sede_nombre=str(data.get("sede_nombre", "")),
+            especialidad_nombre=str(data.get("especialidad_nombre", "")),
+            motivo=str(data.get("motivo", "")),
+        )
+
+
+@dataclass
+class RescheduleDraft:
+    """Datos de un reagendamiento pendiente de confirmacion (PR4).
+
+    Conserva la fecha/hora ORIGINALES de la cita: si cambian entre la
+    propuesta y la confirmacion, el orquestador no ejecuta (fila 10).
+    """
+
+    cita_id: str
+    usuario_id: str
+    fecha_original: str
+    hora_inicio_original: str
+    hora_fin_original: str
+    medico_id: str
+    medico_nombre: str
+    sede_id: str
+    sede_nombre: str
+    especialidad_nombre: str
+    nueva_fecha: str
+    nueva_hora_inicio: str
+    nueva_hora_fin: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RescheduleDraft":
+        return cls(
+            cita_id=str(data.get("cita_id", "")),
+            usuario_id=str(data.get("usuario_id", "")),
+            fecha_original=str(data.get("fecha_original", "")),
+            hora_inicio_original=str(data.get("hora_inicio_original", "")),
+            hora_fin_original=str(data.get("hora_fin_original", "")),
+            medico_id=str(data.get("medico_id", "")),
+            medico_nombre=str(data.get("medico_nombre", "")),
+            sede_id=str(data.get("sede_id", "")),
+            sede_nombre=str(data.get("sede_nombre", "")),
+            especialidad_nombre=str(data.get("especialidad_nombre", "")),
+            nueva_fecha=str(data.get("nueva_fecha", "")),
+            nueva_hora_inicio=str(data.get("nueva_hora_inicio", "")),
+            nueva_hora_fin=str(data.get("nueva_hora_fin", "")),
         )
 
 
