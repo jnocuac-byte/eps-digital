@@ -36,6 +36,17 @@ class _FakeAgent:
         return self.response
 
 
+class _TriageResponse:
+    output = {
+        "especialidad_sugerida_id": "neurologia",
+        "especialidad_sugerida_nombre": "Neurología",
+        "resumen_clinico": "Dolor de cabeza frecuente",
+        "nivel_urgencia": "programable",
+        "red_flag": {"detected": False},
+        "explicacion_al_paciente": "Te recomiendo una valoración médica.",
+    }
+
+
 def _draft(usuario_id: str) -> BookingDraft:
     return BookingDraft(
         usuario_id=usuario_id,
@@ -67,6 +78,73 @@ def _ready_state(orchestrator, conversation_id, usuario_id):
         datetime.now(ZONA_BOGOTA) + timedelta(minutes=5)
     ).isoformat()
     return state
+
+
+def test_unresolved_triage_specialty_falls_back_to_general_medicine(monkeypatch):
+    orchestrator = Orchestrator(_FakeAgent(response=_TriageResponse()), _FakeAgent())
+    state = ConversationState()
+
+    async def resolve(slug, specialty_name, message=None):
+        if specialty_name == "Medicina General":
+            return "e1111111-1111-4111-a111-111111111111"
+        return None
+
+    monkeypatch.setattr(orchestrator, "_resolver_slug", resolve)
+    response = asyncio.run(
+        orchestrator._process_triage(
+            "fallback",
+            "Tengo dolor de cabeza frecuente",
+            [],
+            str(uuid4()),
+            state,
+        )
+    )
+
+    assert state.specialty_id == "e1111111-1111-4111-a111-111111111111"
+    assert state.specialty_name == "Medicina General"
+    assert "Te recomiendo una valoración médica." in response
+    assert "Nota: Neurología no está disponible por ahora" in response
+    assert response.index("Te recomiendo") < response.index("Nota:")
+    assert "Medicina General" in response
+
+
+def test_scheduling_with_unresolved_state_specialty_does_not_repeat_symptom_question(monkeypatch):
+    orchestrator = Orchestrator(_FakeAgent(), _FakeAgent(response="Listo"))
+    state = orchestrator.get_state("fallback-next")
+    state.active_agent = "scheduling"
+    state.specialty_name = "Neurología"
+    state.symptoms_summary = "Dolor de cabeza frecuente"
+
+    async def resolve(slug, specialty_name, message=None):
+        if specialty_name == "Medicina General":
+            return "e1111111-1111-4111-a111-111111111111"
+        return None
+
+    monkeypatch.setattr(orchestrator, "_resolver_slug", resolve)
+    response, updated = asyncio.run(
+        orchestrator.process(
+            "fallback-next",
+            "agéndame una cita",
+            [],
+            usuario_id=str(uuid4()),
+        )
+    )
+
+    assert updated.specialty_id == "e1111111-1111-4111-a111-111111111111"
+    assert "necesito conocer primero tus sintomas" not in response.lower()
+
+
+def test_scheduling_without_symptoms_or_specialty_still_requests_context():
+    orchestrator = Orchestrator(_FakeAgent(), _FakeAgent())
+    response, _state = asyncio.run(
+        orchestrator.process(
+            "missing-context",
+            "agéndame una cita",
+            [],
+            usuario_id=str(uuid4()),
+        )
+    )
+    assert "necesito conocer primero tus sintomas" in response.lower()
 
 
 def test_confirmation_executes_one_post_without_llm(monkeypatch):

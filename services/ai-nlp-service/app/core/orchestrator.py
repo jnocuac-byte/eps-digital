@@ -386,6 +386,7 @@ class Orchestrator:
 
             # Extraer clasificación (Pydantic, dict o JSON crudo)
             classification = _extraer_clasificacion(response)
+            fallback_notice = None
 
             if classification is not None:
                 # Extraer campos de la clasificación (soporta Pydantic y dict)
@@ -417,6 +418,36 @@ class Orchestrator:
                     resolved_specialty_id = await self._resolver_slug(
                         raw_specialty_id, esp_nombre
                     )
+                fallback_notice = None
+                if not resolved_specialty_id and (esp_nombre or raw_specialty_id):
+                    fallback_specialty_id = await self._resolver_slug(
+                        "", "Medicina General"
+                    )
+                    if fallback_specialty_id:
+                        fallback_notice = (
+                            f"Nota: {esp_nombre or raw_specialty_id} no está disponible "
+                            "por ahora; puedo agendarte con Medicina General, que puede "
+                            "remitirte."
+                        )
+                        resolved_specialty_id = fallback_specialty_id
+                        esp_nombre = "Medicina General"
+                        log_event(
+                            "ORCH",
+                            "SPECIALTY_FALLBACK",
+                            "warning",
+                            "Especialidad no disponible; usando Medicina General",
+                        )
+                    else:
+                        fallback_notice = (
+                            f"No pude encontrar {esp_nombre or raw_specialty_id or 'esa especialidad'} "
+                            "en el catálogo y Medicina General tampoco está disponible."
+                        )
+                        log_event(
+                            "ORCH",
+                            "SPECIALTY_FALLBACK",
+                            "error",
+                            "No se pudo resolver Medicina General en el catálogo",
+                        )
                 log_event(
                     "ORCH", "TRIAGE", "debug",
                     f"specialty_id crudo={raw_specialty_id!r}, "
@@ -459,6 +490,8 @@ class Orchestrator:
                     f"con nivel de urgencia {state.urgency_level or 'a determinar'}. "
                     "Un asistente te ayudara a agendar tu cita."
                 )
+            if fallback_notice:
+                respuesta = f"{respuesta}\n\n{fallback_notice}"
 
             return respuesta
 
@@ -802,11 +835,43 @@ class Orchestrator:
                 )
 
             if not state.specialty_id:
-                uuid_real = await self._resolver_slug("", None, message)
+                uuid_real = await self._resolver_slug(
+                    "", state.specialty_name, message
+                )
+                if not uuid_real and state.specialty_name:
+                    uuid_real = await self._resolver_slug("", "Medicina General")
+                    if uuid_real:
+                        original_specialty = state.specialty_name
+                        state.specialty_id = uuid_real
+                        state.specialty_name = "Medicina General"
+                        log_event(
+                            "ORCH",
+                            "SPECIALTY_FALLBACK",
+                            "warning",
+                            "Especialidad del estado no disponible; usando Medicina General",
+                        )
+                        respuesta_texto = (
+                            f"Nota: {original_specialty} no está disponible por ahora; "
+                            "puedo agendarte con Medicina General, que puede remitirte."
+                        )
+                        respuesta_texto += "\n\n" + await self._process_scheduling(
+                            conversation_id, message, history, usuario_id, state
+                        )
+                        if db is not None:
+                            self._persist_state(conversation_id, state, db)
+                        return respuesta_texto, state
                 if uuid_real:
                     state.specialty_id = uuid_real
                     state.active_agent = "scheduling"
                 else:
+                    if state.symptoms_summary or state.specialty_name:
+                        respuesta_texto = (
+                            "No pude encontrar una especialidad disponible para tu solicitud. "
+                            "Por favor, intenta con otra especialidad."
+                        )
+                        if db is not None:
+                            self._persist_state(conversation_id, state, db)
+                        return respuesta_texto, state
                     state.active_agent = "triage"
                     respuesta_texto = (
                         "Para ayudarte a agendar necesito conocer primero tus sintomas "

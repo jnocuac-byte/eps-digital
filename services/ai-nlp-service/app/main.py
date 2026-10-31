@@ -217,11 +217,14 @@ async def post_chat(
         else:
             conversacion = get_conversacion(db, payload.conversacion_id)
             if conversacion is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conversacion no encontrada",
+                log_event(
+                    "MAIN",
+                    "AUTH",
+                    "warning",
+                    f"Conversacion inexistente {payload.conversacion_id}; se crea una nueva",
                 )
-            if conversacion.usuario_id != usuario_id_uuid:
+                conversacion = crear_conversacion(db, usuario_id=usuario_id_uuid)
+            elif conversacion.usuario_id != usuario_id_uuid:
                 log_event(
                     "MAIN",
                     "AUTH",
