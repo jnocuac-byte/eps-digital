@@ -805,13 +805,44 @@ def generar_slots_disponibles(
 	servicio_id: UUID | None = None,
 	especialidad_id: UUID | None = None,
 ) -> list[dict[str, str]]:
-	"""Calcula las franjas horarias disponibles para agendar una cita.
+	"""Calcula el contrato legado, deduplicado por hora."""
+	return _generar_slots(
+		db,
+		fecha=fecha,
+		medico_id=medico_id,
+		servicio_id=servicio_id,
+		especialidad_id=especialidad_id,
+		detallado=False,
+	)
 
-	Slots disponibles = turnos del medico (catalog-service)
-	                    - citas programadas que se solapen (eps_citas)
-	                    - franjas sin anticipacion minima si la fecha es hoy
-	                      (America/Bogota). Fechas pasadas retornan [].
-	"""
+
+def generar_slots_detallados(
+	db: Session,
+	fecha: date,
+	medico_id: UUID | None = None,
+	servicio_id: UUID | None = None,
+	especialidad_id: UUID | None = None,
+) -> list[dict[str, str]]:
+	"""Calcula opciones completas conservando medico, sede y especialidad."""
+	return _generar_slots(
+		db,
+		fecha=fecha,
+		medico_id=medico_id,
+		servicio_id=servicio_id,
+		especialidad_id=especialidad_id,
+		detallado=True,
+	)
+
+
+def _generar_slots(
+	db: Session,
+	fecha: date,
+	medico_id: UUID | None,
+	servicio_id: UUID | None,
+	especialidad_id: UUID | None,
+	detallado: bool,
+) -> list[dict[str, str]]:
+	"""Nucleo compartido para los contratos legado y detallado."""
 	if fecha < hoy_bogota():
 		return []
 
@@ -819,6 +850,9 @@ def generar_slots_disponibles(
 		raise ValueError("Se requiere medico_id, servicio_id o especialidad_id para consultar disponibilidad")
 
 	duracion = _obtener_duracion_especialidad(especialidad_id)
+	duraciones: dict[UUID, int] = {}
+	if especialidad_id is not None:
+		duraciones[especialidad_id] = duracion
 	candidatos = _resolver_medicos_candidatos(fecha, medico_id, servicio_id, especialidad_id)
 	if not candidatos:
 		return []
@@ -842,6 +876,7 @@ def generar_slots_disponibles(
 		limite_hoy = (ahora_bogota() + timedelta(minutes=ANTELACION_MINIMA_MINUTOS)).time()
 
 	slots_por_hora: dict[time, time] = {}
+	slots_detallados: list[dict[str, str]] = []
 
 	for medico in candidatos:
 		citas_medico = ocupadas.get(medico, [])
@@ -849,16 +884,51 @@ def generar_slots_disponibles(
 			try:
 				turno_inicio = time.fromisoformat(str(turno.get("hora_inicio"))[:8])
 				turno_fin = time.fromisoformat(str(turno.get("hora_fin"))[:8])
-			except ValueError:
+			except (TypeError, ValueError):
 				continue
 			if turno_fin <= turno_inicio:
 				continue
-			for slot_inicio, slot_fin in _iterar_slots(turno_inicio, turno_fin, duracion, fecha):
+			if detallado:
+				try:
+					turno_especialidad = UUID(str(turno["especialidad_id"]))
+					sede = UUID(str(turno["sede_id"]))
+				except (KeyError, TypeError, ValueError):
+					continue
+				if especialidad_id is not None and turno_especialidad != especialidad_id:
+					continue
+				if turno_especialidad not in duraciones:
+					duraciones[turno_especialidad] = _obtener_duracion_especialidad(turno_especialidad)
+				duracion_turno = duraciones[turno_especialidad]
+			else:
+				duracion_turno = duracion
+			for slot_inicio, slot_fin in _iterar_slots(turno_inicio, turno_fin, duracion_turno, fecha):
 				if any(_solapa(slot_inicio, slot_fin, c) for c in citas_medico):
 					continue
 				if limite_hoy is not None and slot_inicio < limite_hoy:
 					continue
-				slots_por_hora.setdefault(slot_inicio, slot_fin)
+				if detallado:
+					slots_detallados.append(
+						{
+							"medico_id": str(medico),
+							"sede_id": str(sede),
+							"especialidad_id": str(turno_especialidad),
+							"hora_inicio": slot_inicio.strftime("%H:%M"),
+							"hora_fin": slot_fin.strftime("%H:%M"),
+						}
+					)
+				else:
+					slots_por_hora.setdefault(slot_inicio, slot_fin)
+
+	if detallado:
+		return sorted(
+			slots_detallados,
+			key=lambda slot: (
+				slot["hora_inicio"],
+				slot["medico_id"],
+				slot["sede_id"],
+				slot["especialidad_id"],
+			),
+		)
 
 	return [
 		{

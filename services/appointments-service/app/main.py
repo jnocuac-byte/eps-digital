@@ -26,6 +26,7 @@ from app.crud import (
 	get_metricas_citas,
 	get_metricas_medico,
 	get_recordatorios_pendientes,
+	generar_slots_detallados,
 	reprogramar_cita,
 	update_cita,
 )
@@ -44,6 +45,7 @@ from app.schemas import (
 	RecordatorioResponse,
 	ReprogramarCitaRequest,
 	SlotDisponible,
+	SlotDisponibleDetallado,
 )
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -233,6 +235,40 @@ def listar_slots_disponibles(
 		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 	log_event("CITAS", "SLOTS", "info", f"Slots disponibles: {len(slots)}")
 	return [SlotDisponible(**slot) for slot in slots]
+
+
+@app.get(
+	"/citas/slots-detallados",
+	response_model=list[SlotDisponibleDetallado],
+	tags=["citas"],
+)
+def listar_slots_detallados(
+	fecha: date = Query(...),
+	medico_id: UUID | None = Query(default=None),
+	servicio_id: UUID | None = Query(default=None),
+	especialidad_id: UUID | None = Query(default=None),
+	db: Session = Depends(get_db),
+) -> list[SlotDisponibleDetallado]:
+	"""Opciones disponibles con la combinacion exacta de medico, sede y horario."""
+	log_event(
+		"CITAS",
+		"SLOTS_DETAIL",
+		"info",
+		f"Consultar slots detallados fecha={fecha}, medico={medico_id}, especialidad={especialidad_id}",
+	)
+	try:
+		slots = generar_slots_detallados(
+			db,
+			fecha=fecha,
+			medico_id=medico_id,
+			servicio_id=servicio_id,
+			especialidad_id=especialidad_id,
+		)
+	except ValueError as exc:
+		log_event("CITAS", "SLOTS_DETAIL", "warning", f"Error consultando slots detallados: {exc}")
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+	log_event("CITAS", "SLOTS_DETAIL", "info", f"Slots detallados disponibles: {len(slots)}")
+	return [SlotDisponibleDetallado(**slot) for slot in slots]
 
 
 @app.get("/citas/metricas", tags=["admin"])
