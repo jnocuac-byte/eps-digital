@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import unicodedata
 from datetime import datetime
 from threading import RLock
 from typing import Any
@@ -11,8 +12,10 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 from strands import tool
+from strands.types.tools import ToolContext
 
 from ..core.logger import log_event
+from ..core.conversation_state import BookingDraft
 
 CITAS_TIMEOUT_SECONDS = 4.0
 CATALOG_CACHE_TTL_SECONDS = 10 * 60
@@ -278,6 +281,8 @@ def buscar_opciones_cita(especialidad_id: str, fecha_desde: str = "") -> str:
         fecha_desde = datetime.now(ZoneInfo("America/Bogota")).date().isoformat()
 
     try:
+        if not citas_url:
+            return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
         with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
             response = client.get(
                 f"{citas_url}/citas/proxima-disponibilidad",
@@ -343,69 +348,30 @@ def buscar_opciones_cita(especialidad_id: str, fecha_desde: str = "") -> str:
     }, ensure_ascii=False)
 
 
-@tool
-def agendar_cita(
-    usuario_id: str,
-    especialidad_id: str,
-    medico_id: str,
-    tipo_servicio: str,
-    fecha: str,
-    hora: str,
-    sede_id: str,
-    descripcion_sintomas: str = "",
-) -> str:
-    """Agenda una cita médica con los datos confirmados por el usuario.
-
-    Args:
-        usuario_id: UUID del usuario autenticado.
-        especialidad_id: UUID de la especialidad médica (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
-        medico_id: UUID del médico seleccionado (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
-        tipo_servicio: Tipo de servicio. Opciones: medicina_general, especialista, urgencias, laboratorio.
-        fecha: Fecha de la cita en formato YYYY-MM-DD (ej: 2026-09-07).
-        hora: Hora de la cita en formato HH:MM en 24 horas (ej: 08:00, 14:30).
-        sede_id: UUID de la sede/clínica (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
-        descripcion_sintomas: Descripción opcional de los síntomas reportados por el paciente.
-
-    Returns:
-        JSON con la confirmación: cita_id (UUID), fecha, hora, estado, mensaje.
-    """
-    log_event("TOOLS", "EXEC", "info", f"Ejecutando agendar_cita(medico_id={medico_id}, fecha={fecha}, hora={hora})")
-
-    campos_requeridos = {
-        "usuario_id": usuario_id,
-        "medico_id": medico_id,
-        "especialidad_id": especialidad_id,
-        "tipo_servicio": tipo_servicio,
-        "fecha": fecha,
-        "hora": hora,
-        "sede_id": sede_id,
-    }
-    faltantes = [nombre for nombre, valor in campos_requeridos.items() if not valor]
-    if faltantes:
-        return json.dumps({
-            "ok": False,
-            "tool": "agendar_cita",
-            "error": f"Faltan parametros requeridos para agendar la cita: {', '.join(faltantes)}. Solicitalos al usuario o al contexto antes de intentar de nuevo.",
-        }, ensure_ascii=False)
-
+def crear_cita_desde_draft(draft: BookingDraft) -> dict[str, Any]:
+    """Crea una cita usando exclusivamente el draft validado por el orquestador."""
+    log_event(
+        "TOOLS",
+        "EXEC",
+        "info",
+        f"Creando cita desde draft medico={draft.medico_id}, fecha={draft.fecha}, hora={draft.hora_inicio}",
+    )
     citas_url = _obtener_citas_service_url()
     if not citas_url:
-        return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
-
-    hora_fin = _sumar_minutos_a_hora(hora, 30)
+        return {"ok": False, "error": "CITAS_SERVICE_URL no configurado."}
     payload = {
-        "usuario_id": usuario_id,
-        "medico_id": medico_id,
-        "especialidad_id": especialidad_id,
-        "tipo_servicio": tipo_servicio,
-        "fecha_cita": fecha,
-        "hora_inicio": hora,
-        "hora_fin": hora_fin,
-        "sede_id": sede_id,
+        "usuario_id": draft.usuario_id,
+        "medico_id": draft.medico_id,
+        "especialidad_id": draft.especialidad_id,
+        "tipo_servicio": draft.tipo_servicio,
+        "fecha_cita": draft.fecha,
+        "hora_inicio": draft.hora_inicio,
+        "hora_fin": draft.hora_fin,
+        "sede_id": draft.sede_id,
     }
-    if descripcion_sintomas:
-        payload["descripcion_sintomas"] = descripcion_sintomas
-    headers = {"Content-Type": "application/json", "X-User-ID": str(usuario_id)}
+    if draft.descripcion_sintomas:
+        payload["descripcion_sintomas"] = draft.descripcion_sintomas
+    headers = {"Content-Type": "application/json", "X-User-ID": draft.usuario_id}
 
     try:
         with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
@@ -414,24 +380,169 @@ def agendar_cita(
             )
             if 200 <= response.status_code < 300:
                 data = response.json()
-                return json.dumps({
-                    "ok": True,
-                    "cita_id": str(data.get("cita_id", "")),
-                    "fecha": fecha,
-                    "hora": hora,
-                    "estado": data.get("estado", "programada"),
-                    "mensaje": "Cita agendada correctamente!",
-                }, ensure_ascii=False)
-            return json.dumps({
-                "ok": False,
-                "error": "Problema al agendar. Intentamos de nuevo?",
-            }, ensure_ascii=False)
+                return {"ok": True, "cita_id": str(data.get("cita_id", ""))}
+            return {"ok": False, "error": "Problema al agendar la cita."}
     except httpx.TimeoutException:
-        return json.dumps({"ok": False, "error": "La solicitud tardo demasiado."}, ensure_ascii=False)
+        existing = _buscar_cita_existente(draft)
+        if existing:
+            return {"ok": True, "cita_id": existing, "recovered": True}
+        return {"ok": False, "timeout": True, "error": "La solicitud tardo demasiado."}
     except httpx.RequestError:
-        return json.dumps({"ok": False, "error": "Problema de conexion."}, ensure_ascii=False)
+        return {"ok": False, "error": "Problema de conexion."}
     except Exception:
-        return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
+        return {"ok": False, "error": "Error inesperado."}
+
+
+def _buscar_cita_existente(draft: BookingDraft) -> str | None:
+    """Busca una cita programada equivalente después de una respuesta perdida."""
+    citas_url = _obtener_citas_service_url()
+    if not citas_url:
+        return None
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            response = client.get(
+                f"{citas_url}/citas/usuario/{draft.usuario_id}",
+                headers={"Content-Type": "application/json"},
+            )
+        if not 200 <= response.status_code < 300:
+            return None
+        for cita in response.json():
+            if (
+                cita.get("estado") == "programada"
+                and str(cita.get("medico_id")) == draft.medico_id
+                and str(cita.get("fecha_cita")) == draft.fecha
+                and str(cita.get("hora_inicio", ""))[:5] == draft.hora_inicio[:5]
+            ):
+                return str(cita.get("cita_id"))
+    except (httpx.RequestError, httpx.TimeoutException, ValueError, TypeError):
+        return None
+    return None
+
+
+def _normalizar_texto(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    ).lower().strip()
+
+
+def _tipo_servicio_desde_especialidad(nombre: str) -> str:
+    normalized = _normalizar_texto(nombre)
+    if "urgencia" in normalized:
+        return "urgencias"
+    if "laboratorio" in normalized:
+        return "laboratorio"
+    if "general" in normalized:
+        return "medicina_general"
+    return "especialista"
+
+
+@tool(context=True)
+def proponer_cita(
+    fecha: str,
+    hora: str,
+    sede: str = "",
+    elegir_automaticamente: bool = False,
+    tool_context: ToolContext | None = None,
+) -> str:
+    """Selecciona un slot exacto y guarda un draft de reserva sin ejecutarlo."""
+    invocation_state = tool_context.invocation_state if tool_context else {}
+    turn_context = invocation_state.get("turn_context")
+    if turn_context is None or not invocation_state.get("state"):
+        return json.dumps({"ok": False, "error": "No hay contexto de conversación para guardar la propuesta."}, ensure_ascii=False)
+
+    state = invocation_state["state"]
+    usuario_id = invocation_state.get("usuario_id")
+    if not usuario_id or not state.specialty_id:
+        return json.dumps({"ok": False, "error": "Falta la identidad del paciente o la especialidad."}, ensure_ascii=False)
+
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            response = client.get(
+                f"{_obtener_citas_service_url()}/citas/slots-detallados",
+                params={"especialidad_id": state.specialty_id, "fecha": fecha},
+                headers={"Content-Type": "application/json"},
+            )
+        if not 200 <= response.status_code < 300:
+            return json.dumps({"ok": False, "error": "No pude consultar los cupos para esa fecha."}, ensure_ascii=False)
+        slots = response.json()
+    except (httpx.RequestError, httpx.TimeoutException):
+        return json.dumps({"ok": False, "error": "Problema de conexión al consultar los cupos."}, ensure_ascii=False)
+
+    opciones = [
+        slot for slot in slots
+        if str(slot.get("hora_inicio", ""))[:5] == hora[:5]
+    ]
+    if sede:
+        sede_normalizada = _normalizar_texto(sede)
+        sedes_result = _consultar_catalog_service_cached("/sedes")
+        sedes = sedes_result.get("data", []) if sedes_result.get("ok") else []
+        sede_ids = {
+            str(item.get("sede_id"))
+            for item in sedes
+            if sede_normalizada in _normalizar_texto(str(item.get("nombre", "")))
+        }
+        opciones = [slot for slot in opciones if str(slot.get("sede_id")) in sede_ids]
+
+    if not opciones:
+        return json.dumps({"ok": False, "error": f"No encontré un cupo disponible el {fecha} a las {hora[:5]}."}, ensure_ascii=False)
+
+    sede_ids = {str(slot.get("sede_id")) for slot in opciones}
+    if len(sede_ids) > 1 and not elegir_automaticamente:
+        return json.dumps({
+            "ok": False,
+            "requiere_sede": True,
+            "opciones": opciones,
+            "error": "Hay varias sedes disponibles para esa hora. Indica cuál prefieres.",
+        }, ensure_ascii=False)
+
+    sedes_result = _consultar_catalog_service_cached("/sedes")
+    sedes = sedes_result.get("data", []) if sedes_result.get("ok") else []
+    sedes_por_id = {
+        str(item.get("sede_id")): item for item in sedes
+    }
+    opciones.sort(
+        key=lambda slot: (
+            _normalizar_texto(
+                str(sedes_por_id.get(str(slot.get("sede_id")), {}).get("nombre", ""))
+            ),
+            str(slot.get("medico_id")),
+        )
+    )
+    seleccion = opciones[0]
+    sede_data = next(
+        (item for item in sedes if str(item.get("sede_id")) == str(seleccion.get("sede_id"))),
+        {},
+    )
+    medico_result = _consultar_catalog_service_cached(f"/medicos/{seleccion.get('medico_id')}")
+    medico_data = medico_result.get("data", {}) if medico_result.get("ok") else {}
+    draft = BookingDraft(
+        usuario_id=str(usuario_id),
+        especialidad_id=str(state.specialty_id),
+        especialidad_nombre=state.specialty_name or "Especialidad médica",
+        medico_id=str(seleccion["medico_id"]),
+        medico_nombre=f"{medico_data.get('nombres', '')} {medico_data.get('apellidos', '')}".strip() or "Médico disponible",
+        sede_id=str(seleccion["sede_id"]),
+        sede_nombre=str(sede_data.get("nombre", "Sede disponible")),
+        sede_direccion=str(sede_data.get("direccion", "")),
+        tipo_servicio=_tipo_servicio_desde_especialidad(state.specialty_name or ""),
+        fecha=fecha,
+        hora_inicio=str(seleccion["hora_inicio"])[:5],
+        hora_fin=str(seleccion["hora_fin"])[:5],
+        descripcion_sintomas=state.symptoms_summary or "",
+    )
+    turn_context.set_draft(draft)
+    return json.dumps({
+        "ok": True,
+        "draft_creado": True,
+        "fecha": draft.fecha,
+        "hora_inicio": draft.hora_inicio,
+        "hora_fin": draft.hora_fin,
+        "medico_nombre": draft.medico_nombre,
+        "sede_nombre": draft.sede_nombre,
+        "sede_direccion": draft.sede_direccion,
+        "mensaje": "Propuesta guardada. El sistema generará el resumen oficial.",
+    }, ensure_ascii=False)
 
 
 @tool
@@ -608,7 +719,7 @@ SCHEDULING_TOOLS = [
     obtener_sedes,
     obtener_disponibilidad_citas,
     buscar_opciones_cita,
-    agendar_cita,
+    proponer_cita,
     consultar_citas_usuario,
     reagendar_cita,
     cancelar_cita,

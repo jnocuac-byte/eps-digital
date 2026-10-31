@@ -1,18 +1,30 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
+import re
+import time
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 from strands import Agent
-from strands.hooks.events import AfterModelCallEvent
+from strands.hooks.events import (
+    AfterModelCallEvent,
+    AfterToolCallEvent,
+    BeforeModelCallEvent,
+    BeforeToolCallEvent,
+)
 from strands.hooks.registry import HookOrder
 
 from .conversation_state import ConversationState, classify_intent, es_uuid_valido
+from .conversation_state import BookingDraft
 from .logger import log_event
+from .turn_context import TurnContext
 from ..knowledge.retrieval import RetrievedKnowledge, retrieve_knowledge
 
 MAX_HISTORY_MESSAGES = 6
@@ -20,6 +32,90 @@ MAX_HISTORY_MESSAGES = 6
 _ROUTING_KEY_PREFIX = "strands:model_routing"
 ZONA_BOGOTA = ZoneInfo("America/Bogota")
 DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+BOOKING_DRAFT_TTL = timedelta(minutes=10)
+BOOKING_EXECUTION_TIMEOUT = timedelta(seconds=30)
+_BOOKING_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _booking_lock(conversation_id: str) -> asyncio.Lock:
+    lock = _BOOKING_LOCKS.setdefault(conversation_id, asyncio.Lock())
+    if len(_BOOKING_LOCKS) > 1024:
+        for key, candidate in list(_BOOKING_LOCKS.items()):
+            if candidate is not lock and not candidate.locked():
+                _BOOKING_LOCKS.pop(key, None)
+                if len(_BOOKING_LOCKS) <= 1024:
+                    break
+    return lock
+
+
+def _normalizar_confirmacion(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    return " ".join(
+        "".join(char if char.isalnum() or char.isspace() else " " for char in normalized.lower()).split()
+    )
+
+
+def render_booking_summary(draft: BookingDraft) -> str:
+    """Renderiza el único resumen confirmable de una reserva."""
+    fecha = datetime.strptime(draft.fecha, "%Y-%m-%d").date()
+    dia = DIAS_SEMANA[fecha.weekday()]
+    motivo = draft.descripcion_sintomas or "Consulta médica"
+    return (
+        "RESUMEN OFICIAL DE LA CITA\n"
+        f"- Especialidad: {draft.especialidad_nombre}\n"
+        f"- Fecha: {dia} {fecha.strftime('%d/%m/%Y')}\n"
+        f"- Hora: {draft.hora_inicio} - {draft.hora_fin}\n"
+        f"- Médico: {draft.medico_nombre}\n"
+        f"- Sede: {draft.sede_nombre} ({draft.sede_direccion})\n"
+        f"- Motivo: {motivo}\n\n"
+        "¿Confirmas?"
+    )
+
+
+def _success_message(draft: BookingDraft) -> str:
+    fecha = datetime.strptime(draft.fecha, "%Y-%m-%d").date()
+    meses = [
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    ]
+    return (
+        f"Tu cita de {draft.especialidad_nombre} quedó agendada para el "
+        f"{DIAS_SEMANA[fecha.weekday()]} {fecha.day} de {meses[fecha.month - 1]} "
+        f"de {fecha.year}, de {draft.hora_inicio} a {draft.hora_fin}, con "
+        f"{draft.medico_nombre}, en {draft.sede_nombre} ({draft.sede_direccion})."
+    )
+
+
+def _is_affirmative(value: str) -> bool:
+    words = _normalizar_confirmacion(value).split()
+    allowed = {
+        "si", "sii", "claro", "dale", "ok", "listo", "confirmo",
+        "confirmar", "agendala", "agendalo", "por", "favor",
+        "de", "acuerdo", "correcto", "perfecto",
+    }
+    strong = {"si", "sii", "confirmo", "agendala", "agendalo", "dale", "ok", "listo"}
+    return bool(words) and all(word in allowed for word in words) and bool(set(words) & strong)
+
+
+def _is_explicit_authorization(value: str) -> bool:
+    normalized = _normalizar_confirmacion(value)
+    if "?" in value or normalized.startswith(("no la", "no quiero", "no agendes")):
+        return False
+    return any(phrase in normalized for phrase in {
+        "agendala de una vez",
+        "no esperes mi confirmacion",
+        "decide tu y agendala",
+    })
+
+
+def _is_unambiguous_negative(value: str) -> bool:
+    return _normalizar_confirmacion(value) in {
+        "no",
+        "no la agendes",
+        "cancela la propuesta",
+        "ya no",
+    }
 
 
 def _registrar_hook_provider(agent: Agent) -> None:
@@ -30,14 +126,52 @@ def _registrar_hook_provider(agent: Agent) -> None:
     invocation_state y almacena candidate.name en agent._provider_used.
     """
 
-    def _capturar_provider(event: AfterModelCallEvent) -> None:
-        for key, value in event.invocation_state.items():
+    def _provider_name(invocation_state: dict[str, Any]) -> str:
+        for key, value in invocation_state.items():
             if key.startswith(_ROUTING_KEY_PREFIX):
                 candidate = getattr(value, "candidate", None)
                 if candidate is not None:
-                    agent._provider_used = getattr(candidate, "name", "unknown")
-                    return
-        agent._provider_used = "unknown"
+                    return getattr(candidate, "name", "unknown")
+        return "unknown"
+
+    def _capturar_provider(event: AfterModelCallEvent) -> None:
+        agent._provider_used = _provider_name(event.invocation_state)
+        metrics = event.invocation_state.get("scheduling_metrics")
+        if metrics is not None:
+            elapsed = (time.perf_counter() - metrics.pop("_model_started_at", time.perf_counter())) * 1000
+            metrics["llm_ms"] += elapsed
+            exception = event.exception
+            metrics["provider_attempts"].append({
+                "provider": agent._provider_used,
+                "status": "429" if exception and "429" in str(exception) else (
+                    "error" if exception else "ok"
+                ),
+                "ms": round(elapsed),
+            })
+
+    def _before_model(event: BeforeModelCallEvent) -> None:
+        metrics = event.invocation_state.get("scheduling_metrics")
+        if metrics is not None:
+            metrics["_model_started_at"] = time.perf_counter()
+
+    def _before_tool(event: BeforeToolCallEvent) -> None:
+        metrics = event.invocation_state.get("scheduling_metrics")
+        if metrics is not None:
+            metrics.setdefault("_tool_started_at", {})[
+                event.tool_use.get("toolUseId", str(id(event)))
+            ] = time.perf_counter()
+
+    def _after_tool(event: AfterToolCallEvent) -> None:
+        metrics = event.invocation_state.get("scheduling_metrics")
+        if metrics is not None:
+            tool_id = event.tool_use.get("toolUseId", str(id(event)))
+            started = metrics.setdefault("_tool_started_at", {}).pop(tool_id, None)
+            if started is not None:
+                metrics["tools_ms"] += (time.perf_counter() - started) * 1000
+
+    agent.hooks.add_callback(BeforeModelCallEvent, _before_model, order=40)
+    agent.hooks.add_callback(BeforeToolCallEvent, _before_tool, order=40)
+    agent.hooks.add_callback(AfterToolCallEvent, _after_tool, order=40)
 
     agent.hooks.add_callback(AfterModelCallEvent, _capturar_provider, order=60)
 
@@ -345,7 +479,7 @@ class Orchestrator:
     ) -> str:
         """Procesa un mensaje con el agente de agendamiento.
 
-        Strands ejecuta las tools (obtener_medicos, agendar_cita, etc.)
+        Strands ejecuta las tools (obtener_medicos, proponer_cita, etc.)
         de forma autónoma en un loop interno.
         """
         state.active_agent = "scheduling"
@@ -364,9 +498,36 @@ class Orchestrator:
 
         log_event("ORCH", "SCHEDULING", "info", f"Invocando scheduling_agent conv={conversation_id[:8]}")
 
+        turn_context = TurnContext(conversation_id, usuario_id, state)
+        turn_started_at = time.perf_counter()
+        scheduling_metrics: dict[str, Any] = {
+            "llm_ms": 0.0,
+            "tools_ms": 0.0,
+            "provider_attempts": [],
+        }
         try:
             self._scheduling_agent.messages = []
-            response = self._scheduling_agent(full_message)
+            invocation_state = {
+                "conversation_id": conversation_id,
+                "usuario_id": usuario_id,
+                "state": state,
+                "turn_context": turn_context,
+                "scheduling_metrics": scheduling_metrics,
+            }
+            signature = inspect.signature(self._scheduling_agent.__call__)
+            supports_invocation_state = (
+                "invocation_state" in signature.parameters
+                or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+            )
+            if supports_invocation_state:
+                response = self._scheduling_agent(
+                    full_message, invocation_state=invocation_state
+                )
+            else:
+                response = self._scheduling_agent(full_message)
             provider = getattr(self._scheduling_agent, "_provider_used", "unknown")
 
             # Extraer texto de la respuesta
@@ -380,17 +541,194 @@ class Orchestrator:
             log_event(
                 "ORCH", "SCHEDULING", "info",
                 f"Respuesta scheduling: {len(respuesta)} chars "
-                f"provider={provider}"
+                f"provider={provider} "
+                f"latency_ms={round((time.perf_counter() - turn_started_at) * 1000)} "
+                f"llm_ms={round(scheduling_metrics['llm_ms'])} "
+                f"tools_ms={round(scheduling_metrics['tools_ms'])} "
+                f"provider_attempts={scheduling_metrics['provider_attempts']}"
             )
 
+            if state.booking_draft is not None:
+                respuesta = self._append_booking_summary(state, respuesta)
+            elif (
+                state.last_options_message_count == state.message_count - 1
+                and re.search(r"\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*(?:am|pm)\b", message.lower())
+            ):
+                log_event(
+                    "ORCH",
+                    "ALERT",
+                    "warning",
+                    f"scheduling.selection_without_draft conv={conversation_id[:8]}",
+                )
+            if any(
+                marker in respuesta.lower()
+                for marker in ("horarios disponibles", "opciones disponibles", "cuál de estos")
+            ):
+                state.last_options_message_count = state.message_count
             return respuesta
 
         except Exception as exc:
-            log_event("ORCH", "SCHEDULING", "error", f"Error en scheduling_agent: {exc}")
+            turn_context.rollback()
+            log_event(
+                "ORCH",
+                "SCHEDULING",
+                "error",
+                f"Error en scheduling_agent: {exc} "
+                f"latency_ms={round((time.perf_counter() - turn_started_at) * 1000)} "
+                f"llm_ms={round(scheduling_metrics['llm_ms'])} "
+                f"tools_ms={round(scheduling_metrics['tools_ms'])} "
+                f"provider_attempts={scheduling_metrics['provider_attempts']}",
+            )
             return (
                 "Lo siento, estoy teniendo dificultades tecnicas con el agendamiento. "
                 "Por favor, intenta de nuevo en unos minutos."
             )
+
+    def _append_booking_summary(self, state: ConversationState, response: str) -> str:
+        """Añade o reemplaza el bloque oficial y marca cuándo se mostró."""
+        if state.booking_draft is None:
+            return response
+        marker = "RESUMEN OFICIAL DE LA CITA"
+        base = response.split(marker, 1)[0].rstrip()
+        summary = render_booking_summary(state.booking_draft)
+        state.draft_shown_message_count = state.message_count
+        state.draft_expires_at = (
+            datetime.now(ZONA_BOGOTA) + BOOKING_DRAFT_TTL
+        ).isoformat()
+        state.pending_action = "agendar"
+        state.pending_confirmation = True
+        return f"{base}\n\n{summary}" if base else summary
+
+    def _draft_is_expired(self, state: ConversationState) -> bool:
+        if not state.draft_expires_at:
+            return True
+        try:
+            expires_at = datetime.fromisoformat(state.draft_expires_at)
+        except ValueError:
+            return True
+        return datetime.now(ZONA_BOGOTA) >= expires_at
+
+    def _user_id_is_valid_for_draft(
+        self, usuario_id: str | None, draft: BookingDraft
+    ) -> bool:
+        try:
+            current = UUID(str(usuario_id))
+            expected = UUID(draft.usuario_id)
+        except (TypeError, ValueError):
+            return False
+        return current.int != 0 and expected.int != 0 and current == expected
+
+    async def _execute_booking(
+        self,
+        conversation_id: str,
+        state: ConversationState,
+        usuario_id: str | None,
+        db: Session | None,
+    ) -> str | None:
+        draft = state.booking_draft
+        if draft is None or not draft.is_complete():
+            log_event("ORCH", "BOOKING", "warning", "rejected: draft incompleto")
+            return None
+        if not self._user_id_is_valid_for_draft(usuario_id, draft):
+            log_event("ORCH", "BOOKING", "warning", "rejected: usuario invalido")
+            return None
+
+        lock = _booking_lock(conversation_id)
+        async with lock:
+            if state.last_booking_id and state.last_booking_summary:
+                log_event("ORCH", "BOOKING", "info", "execute: confirmacion repetida")
+                return state.last_booking_summary
+            if state.execution_started_at:
+                try:
+                    started = datetime.fromisoformat(state.execution_started_at)
+                    if datetime.now(ZONA_BOGOTA) - started < BOOKING_EXECUTION_TIMEOUT:
+                        log_event("ORCH", "BOOKING", "warning", "rejected: execution en curso")
+                        return "La reserva ya está siendo procesada. Por favor espera un momento."
+                except ValueError:
+                    pass
+
+            state.execution_started_at = datetime.now(ZONA_BOGOTA).isoformat()
+            if db is not None:
+                self._persist_state(conversation_id, state, db)
+
+            try:
+                from ..agents.tools import crear_cita_desde_draft
+
+                result = await asyncio.to_thread(crear_cita_desde_draft, draft)
+                if result.get("ok"):
+                    message = _success_message(draft)
+                    state.last_booking_id = result.get("cita_id") or "confirmed"
+                    state.last_booking_summary = message
+                    state.booking_draft = None
+                    state.pending_action = None
+                    state.pending_confirmation = False
+                    state.draft_shown_message_count = None
+                    state.draft_expires_at = None
+                    log_event("ORCH", "BOOKING", "info", "execute: reserva exitosa")
+                    return message
+
+                state.draft_shown_message_count = state.message_count
+                state.draft_expires_at = (
+                    datetime.now(ZONA_BOGOTA) + BOOKING_DRAFT_TTL
+                ).isoformat()
+                log_event("ORCH", "BOOKING", "warning", "execute: servicio rechazo la reserva")
+                return "No pude completar la reserva. Tu propuesta sigue guardada; confirma de nuevo para reintentar."
+            finally:
+                state.execution_started_at = None
+                if db is not None:
+                    self._persist_state(conversation_id, state, db)
+
+    async def _handle_pending_booking(
+        self,
+        conversation_id: str,
+        message: str,
+        usuario_id: str | None,
+        state: ConversationState,
+        db: Session | None,
+    ) -> str | None:
+        """Resuelve confirmaciones antes de clasificar intención."""
+        if (
+            state.last_booking_id or state.last_booking_summary
+        ) and not _is_affirmative(message):
+            state.last_booking_id = None
+            state.last_booking_summary = None
+        if state.last_booking_summary and not state.pending_action:
+            if _is_affirmative(message):
+                log_event("ORCH", "BOOKING", "info", "execute: confirmacion repetida tras exito")
+                return state.last_booking_summary
+            return None
+        if state.pending_action != "agendar" or state.booking_draft is None:
+            return None
+        if _is_unambiguous_negative(message):
+            state.booking_draft = None
+            state.pending_action = None
+            state.pending_confirmation = False
+            state.draft_shown_message_count = None
+            state.draft_expires_at = None
+            log_event("ORCH", "BOOKING", "info", "rejected: negacion del usuario")
+            return "Entendido, no agendaré esa cita."
+        if self._draft_is_expired(state):
+            log_event("ORCH", "BOOKING", "warning", "expired: draft fuera de TTL")
+            state.booking_draft = None
+            state.pending_action = None
+            state.pending_confirmation = False
+            state.draft_shown_message_count = None
+            state.draft_expires_at = None
+            return None
+        if state.draft_shown_message_count != state.message_count - 1:
+            log_event("ORCH", "BOOKING", "info", "stale: resumen no corresponde al turno anterior")
+            return None
+        if not self._user_id_is_valid_for_draft(usuario_id, state.booking_draft):
+            log_event("ORCH", "BOOKING", "warning", "rejected: usuario distinto o UUID cero")
+            return None
+        if _is_affirmative(message):
+            log_event("ORCH", "BOOKING", "info", "execute: confirmacion determinista")
+            return await self._execute_booking(conversation_id, state, usuario_id, db)
+        if _is_explicit_authorization(message):
+            log_event("ORCH", "BOOKING", "info", "execute: autorizacion explicita mismo turno")
+            return await self._execute_booking(conversation_id, state, usuario_id, db)
+        log_event("ORCH", "BOOKING", "info", "ambiguous: pasa al agente con draft intacto")
+        return None
 
     async def process(
         self,
@@ -420,6 +758,14 @@ class Orchestrator:
             f"Conv={conversation_id[:8]}.. msg#{state.message_count} "
             f"agent_actual={state.active_agent}"
         )
+
+        pending_response = await self._handle_pending_booking(
+            conversation_id, message, usuario_id, state, db
+        )
+        if pending_response is not None:
+            if db is not None:
+                self._persist_state(conversation_id, state, db)
+            return pending_response, state
 
         # 1. Recuperar contexto y clasificar intencion
         retrieved_knowledge = retrieve_knowledge(db, message) if db is not None else []
@@ -473,6 +819,21 @@ class Orchestrator:
             respuesta_texto = await self._process_scheduling(
                 conversation_id, message, history, usuario_id, state
             )
+            if (
+                state.booking_draft is not None
+                and _is_explicit_authorization(message)
+            ):
+                log_event(
+                    "ORCH",
+                    "BOOKING",
+                    "info",
+                    "execute: autorizacion explicita en turno de propuesta",
+                )
+                executed = await self._execute_booking(
+                    conversation_id, state, usuario_id, db
+                )
+                if executed is not None:
+                    respuesta_texto = executed
         else:
             # "continue" — mantener agente actual
             respuesta_texto = await self._process_triage(
