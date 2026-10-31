@@ -40,18 +40,21 @@ def _build_provider_pool() -> dict[str, RoutingCandidate]:
         from strands.models.gemini import GeminiModel
 
         gemini_registered = False
-        for i in range(1, 4):
+        i = 1
+        while True:
             key = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
-            if key:
-                name = f"gemini-{i}"
-                pool[name] = RoutingCandidate(
-                    model=GeminiModel(
-                        client_args={"api_key": key},
-                        model_id="gemini-3.6-flash",
-                    ),
-                    name=name,
-                )
-                gemini_registered = True
+            if not key:
+                break
+            name = f"gemini-{i}"
+            pool[name] = RoutingCandidate(
+                model=GeminiModel(
+                    client_args={"api_key": key},
+                    model_id="gemini-3.6-flash",
+                ),
+                name=name,
+            )
+            gemini_registered = True
+            i += 1
 
         # Fallback: si no hay keys numeradas, usar GEMINI_API_KEY como gemini-1
         if not gemini_registered:
@@ -124,9 +127,19 @@ def build_fallback_model(order: list[str] | None = None) -> Any:
             "Configura al menos GROQ_API_KEY o GEMINI_API_KEY."
         )
 
-    # Construir lista de candidates según el orden pedido
+    # Expandir el grupo Gemini dinámicamente; no fijar GEMINI_API_KEY_n aquí.
     if order:
-        candidates = [pool[name] for name in order if name in pool]
+        ordered_names: list[str] = []
+        gemini_names = sorted(
+            (name for name in pool if name.startswith("gemini-")),
+            key=lambda name: int(name.removeprefix("gemini-")),
+        )
+        for name in order:
+            if name == "gemini":
+                ordered_names.extend(gemini_names)
+            elif name in pool:
+                ordered_names.append(name)
+        candidates = [pool[name] for name in ordered_names]
         if not candidates:
             log_event(
                 "MODEL", "INIT", "warning",
