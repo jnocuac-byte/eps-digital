@@ -834,6 +834,37 @@ def generar_slots_detallados(
 	)
 
 
+def buscar_proxima_disponibilidad(
+	db: Session,
+	especialidad_id: UUID,
+	desde: date,
+	dias: int = 14,
+	limite: int = 5,
+) -> dict:
+	"""Busca opciones detalladas en fechas consecutivas desde una fecha dada."""
+	inicio = max(desde, hoy_bogota())
+	dias_consultados = 0
+	for offset in range(max(1, dias)):
+		fecha = inicio + timedelta(days=offset)
+		dias_consultados += 1
+		opciones = generar_slots_detallados(
+			db,
+			fecha=fecha,
+			especialidad_id=especialidad_id,
+		)
+		if opciones:
+			return {
+				"fecha": fecha,
+				"opciones": opciones[:max(1, limite)],
+				"dias_consultados": dias_consultados,
+			}
+	return {
+		"fecha": None,
+		"opciones": [],
+		"dias_consultados": dias_consultados,
+	}
+
+
 def _generar_slots(
 	db: Session,
 	fecha: date,

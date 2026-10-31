@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import datetime
+from threading import RLock
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
@@ -12,6 +15,39 @@ from strands import tool
 from ..core.logger import log_event
 
 CITAS_TIMEOUT_SECONDS = 4.0
+CATALOG_CACHE_TTL_SECONDS = 10 * 60
+
+
+class _TtlCache:
+    """Cache process-local y thread-safe para respuestas de catalogo."""
+
+    def __init__(self, ttl_seconds: float) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._values: dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, Any]] = {}
+        self._lock = RLock()
+
+    def get(self, key: tuple[str, tuple[tuple[str, str], ...]]) -> Any | None:
+        now = time.monotonic()
+        with self._lock:
+            cached = self._values.get(key)
+            if cached is None:
+                return None
+            stored_at, value = cached
+            if now - stored_at >= self._ttl_seconds:
+                self._values.pop(key, None)
+                return None
+            return value
+
+    def set(self, key: tuple[str, tuple[tuple[str, str], ...]], value: Any) -> None:
+        with self._lock:
+            self._values[key] = (time.monotonic(), value)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._values.clear()
+
+
+_CATALOG_CACHE = _TtlCache(CATALOG_CACHE_TTL_SECONDS)
 
 
 def _obtener_catalog_service_url() -> str | None:
@@ -60,6 +96,25 @@ def _consultar_catalog_service(
         return {"ok": False, "error": "Error inesperado."}
 
 
+def _consultar_catalog_service_cached(
+    endpoint: str, params: dict | None = None
+) -> dict[str, Any]:
+    """Consulta catalogo con TTL; no almacena respuestas fallidas."""
+    normalized_params = tuple(
+        sorted((str(key), str(value)) for key, value in (params or {}).items())
+    )
+    key = (endpoint, normalized_params)
+    cached = _CATALOG_CACHE.get(key)
+    if cached is not None:
+        log_event("TOOLS", "CACHE", "debug", f"Catalog cache hit {endpoint} params={params}")
+        return {"ok": True, "data": cached}
+
+    result = _consultar_catalog_service(endpoint, params)
+    if result.get("ok"):
+        _CATALOG_CACHE.set(key, result.get("data"))
+    return result
+
+
 def _sumar_minutos_a_hora(hora_str: str, minutos: int) -> str:
     try:
         parts = hora_str.split(":")
@@ -78,7 +133,7 @@ def obtener_especialidades() -> str:
         nombre, descripcion, activa.
     """
     log_event("TOOLS", "EXEC", "info", "Ejecutando obtener_especialidades")
-    result = _consultar_catalog_service("/especialidades")
+    result = _consultar_catalog_service_cached("/especialidades")
     if result.get("ok"):
         return json.dumps({
             "ok": True,
@@ -103,7 +158,9 @@ def obtener_medicos(especialidad_id: str) -> str:
     if not especialidad_id:
         return json.dumps({"ok": False, "error": "Necesito que especialidad queres."}, ensure_ascii=False)
 
-    result = _consultar_catalog_service(f"/especialidades/{especialidad_id}/medicos")
+    result = _consultar_catalog_service_cached(
+        f"/especialidades/{especialidad_id}/medicos"
+    )
     if result.get("ok"):
         return json.dumps({
             "ok": True,
@@ -122,7 +179,7 @@ def obtener_sedes() -> str:
         direccion, telefono, activa.
     """
     log_event("TOOLS", "EXEC", "info", "Ejecutando obtener_sedes")
-    result = _consultar_catalog_service("/sedes")
+    result = _consultar_catalog_service_cached("/sedes")
     if result.get("ok"):
         return json.dumps({
             "ok": True,
@@ -189,6 +246,101 @@ def obtener_disponibilidad_citas(especialidad_id: str, fecha: str) -> str:
         return json.dumps({"ok": False, "error": "Problema de conexion."}, ensure_ascii=False)
     except Exception:
         return json.dumps({"ok": False, "error": "Error inesperado."}, ensure_ascii=False)
+
+
+@tool
+def buscar_opciones_cita(especialidad_id: str, fecha_desde: str = "") -> str:
+    """Busca la primera disponibilidad futura con opciones completas.
+
+    Args:
+        especialidad_id: UUID de la especialidad médica.
+        fecha_desde: Fecha inicial opcional en formato YYYY-MM-DD.
+    """
+    log_event(
+        "TOOLS",
+        "EXEC",
+        "info",
+        f"Ejecutando buscar_opciones_cita(especialidad_id={especialidad_id}, fecha_desde={fecha_desde})",
+    )
+    if not especialidad_id:
+        return json.dumps({"ok": False, "error": "Necesito la especialidad para buscar disponibilidad."}, ensure_ascii=False)
+
+    citas_url = _obtener_citas_service_url()
+    if not citas_url:
+        return json.dumps({"ok": False, "error": "CITAS_SERVICE_URL no configurado."}, ensure_ascii=False)
+
+    if fecha_desde:
+        try:
+            datetime.strptime(fecha_desde, "%Y-%m-%d")
+        except ValueError:
+            return json.dumps({"ok": False, "error": "fecha_desde debe tener formato YYYY-MM-DD."}, ensure_ascii=False)
+    else:
+        fecha_desde = datetime.now(ZoneInfo("America/Bogota")).date().isoformat()
+
+    try:
+        with httpx.Client(timeout=CITAS_TIMEOUT_SECONDS) as client:
+            response = client.get(
+                f"{citas_url}/citas/proxima-disponibilidad",
+                params={
+                    "especialidad_id": especialidad_id,
+                    "desde": fecha_desde,
+                    "dias": 14,
+                    "limite": 5,
+                },
+                headers={"Content-Type": "application/json"},
+            )
+        if not 200 <= response.status_code < 300:
+            return json.dumps({"ok": False, "error": "No pude consultar la próxima disponibilidad."}, ensure_ascii=False)
+        resultado = response.json()
+    except httpx.TimeoutException:
+        return json.dumps({"ok": False, "error": "La consulta de disponibilidad tardó demasiado."}, ensure_ascii=False)
+    except httpx.RequestError:
+        return json.dumps({"ok": False, "error": "Problema de conexión al consultar disponibilidad."}, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"ok": False, "error": "Error inesperado al consultar disponibilidad."}, ensure_ascii=False)
+
+    opciones = resultado.get("opciones", [])
+    if not resultado.get("fecha") or not opciones:
+        return json.dumps({
+            "ok": True,
+            "fecha": None,
+            "opciones": [],
+            "mensaje": f"No encontré cupos entre {fecha_desde} y una ventana de 14 días.",
+        }, ensure_ascii=False)
+
+    sedes = _consultar_catalog_service_cached("/sedes")
+    sedes_por_id = {
+        str(sede.get("sede_id")): sede
+        for sede in (sedes.get("data", []) if sedes.get("ok") else [])
+    }
+    medicos_por_id: dict[str, dict[str, Any]] = {}
+    for opcion in opciones:
+        medico_id = str(opcion.get("medico_id", ""))
+        if medico_id and medico_id not in medicos_por_id:
+            medico = _consultar_catalog_service_cached(f"/medicos/{medico_id}")
+            if medico.get("ok") and isinstance(medico.get("data"), dict):
+                medicos_por_id[medico_id] = medico["data"]
+
+    opciones_legibles = []
+    for opcion in opciones:
+        medico = medicos_por_id.get(str(opcion.get("medico_id")), {})
+        sede = sedes_por_id.get(str(opcion.get("sede_id")), {})
+        nombre_medico = "Médico disponible"
+        if medico:
+            nombre_medico = f"{medico.get('nombres', '')} {medico.get('apellidos', '')}".strip() or nombre_medico
+        opciones_legibles.append({
+            **opcion,
+            "medico_nombre": nombre_medico,
+            "sede_nombre": sede.get("nombre", "Sede disponible"),
+            "sede_direccion": sede.get("direccion", ""),
+        })
+
+    return json.dumps({
+        "ok": True,
+        "fecha": resultado["fecha"],
+        "opciones": opciones_legibles,
+        "mensaje": f"Encontré disponibilidad para el {resultado['fecha']}.",
+    }, ensure_ascii=False)
 
 
 @tool
@@ -452,10 +604,10 @@ def cancelar_cita(usuario_id: str, cita_id: str, motivo: str = "") -> str:
 
 
 SCHEDULING_TOOLS = [
-    obtener_especialidades,
     obtener_medicos,
     obtener_sedes,
     obtener_disponibilidad_citas,
+    buscar_opciones_cita,
     agendar_cita,
     consultar_citas_usuario,
     reagendar_cita,

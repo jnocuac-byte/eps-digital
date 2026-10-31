@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -152,9 +153,21 @@ class Orchestrator:
                 f"Error persistiendo estado para {conversation_id[:8]}: {exc}"
             )
 
-    def _build_system_context(self, state: ConversationState) -> str:
-        """Construye contexto inyectable en el system prompt del agente."""
-        parts: list[str] = []
+    def _build_system_context(
+        self, state: ConversationState, usuario_id: str | None
+    ) -> str:
+        """Construye el unico contexto runtime inyectado al agente."""
+        ahora_bogota = datetime.now(ZONA_BOGOTA)
+        fecha_actual = (
+            f"{ahora_bogota.strftime('%Y-%m-%d')} "
+            f"({DIAS_SEMANA[ahora_bogota.weekday()]})"
+        )
+        parts: list[str] = [
+            f"Fecha actual del sistema: {fecha_actual}. "
+            "No propongas ni consultes fechas anteriores a esta."
+        ]
+        if usuario_id:
+            parts.append(f"usuario_id del paciente: {usuario_id}")
         if state.specialty_name:
             parts.append(f"Especialidad identificada: {state.specialty_name}")
         if state.specialty_id:
@@ -167,11 +180,11 @@ class Orchestrator:
             parts.append(f"Medico seleccionado: {state.selected_doctor_name}")
         if state.selected_doctor_id:
             parts.append(f"medico_id: {state.selected_doctor_id}")
-        if state.selected_sede_name:
-            parts.append(f"Sede seleccionada: {state.selected_sede_name}")
         if state.selected_sede_id:
             parts.append(f"sede_id: {state.selected_sede_id}")
-        return "\n".join(parts) if parts else ""
+        if state.selected_sede_name:
+            parts.append(f"sede: {state.selected_sede_name}")
+        return "\n".join(parts)
 
     async def _process_triage(
         self,
@@ -263,8 +276,28 @@ class Orchestrator:
                     f"provider={provider}"
                 )
 
+                # Normalizar specialty_id antes de persistirlo o hacer handoff.
+                raw_specialty_id = str(esp_id) if esp_id else None
+                resolved_specialty_id = raw_specialty_id
+                if raw_specialty_id and not es_uuid_valido(raw_specialty_id):
+                    resolved_specialty_id = await self._resolver_slug(
+                        raw_specialty_id, esp_nombre
+                    )
+                log_event(
+                    "ORCH", "TRIAGE", "debug",
+                    f"specialty_id crudo={raw_specialty_id!r}, "
+                    f"resuelto={resolved_specialty_id!r}",
+                )
+                if raw_specialty_id and not resolved_specialty_id:
+                    log_event(
+                        "ORCH", "TRIAGE", "warning",
+                        f"No se pudo resolver specialty_id={raw_specialty_id!r}",
+                    )
+
                 # Actualizar estado (incluir symptoms_summary explícitamente)
-                state.specialty_id = esp_id
+                state.specialty_id = resolved_specialty_id if es_uuid_valido(
+                    resolved_specialty_id or ""
+                ) else None
                 state.specialty_name = esp_nombre
                 state.symptoms_summary = resumen
                 state.urgency_level = urgencia
@@ -317,37 +350,8 @@ class Orchestrator:
         """
         state.active_agent = "scheduling"
 
-        # Construir contexto del paciente para el agente
-        ahora_bogota = datetime.now(ZONA_BOGOTA)
-        fecha_actual_str = f"{ahora_bogota.strftime('%Y-%m-%d')} ({DIAS_SEMANA[ahora_bogota.weekday()]})"
-
-        context_parts: list[str] = []
-        context_parts.append(
-            f"Fecha actual del sistema: {fecha_actual_str}. "
-            "NUNCA propongas ni consultes fechas anteriores a esta."
-        )
-        if usuario_id:
-            context_parts.append(f"usuario_id del paciente: {usuario_id}")
-        if state.specialty_id:
-            context_parts.append(f"specialty_id: {state.specialty_id}")
-        if state.specialty_name:
-            context_parts.append(f"especialidad: {state.specialty_name}")
-        if state.symptoms_summary:
-            context_parts.append(f"sintomas_reportados: {state.symptoms_summary}")
-        if state.urgency_level:
-            context_parts.append(f"nivel_urgencia: {state.urgency_level}")
-        if state.selected_doctor_id:
-            context_parts.append(f"medico_id: {state.selected_doctor_id}")
-        if state.selected_doctor_name:
-            context_parts.append(f"medico: {state.selected_doctor_name}")
-        if state.selected_sede_id:
-            context_parts.append(f"sede_id: {state.selected_sede_id}")
-        if state.selected_sede_name:
-            context_parts.append(f"sede: {state.selected_sede_name}")
-
-        context_str = "\n".join(context_parts) if context_parts else "Sin contexto previo."
-
         # Construir mensaje completo
+        context_str = self._build_system_context(state, usuario_id)
         full_message = f"## CONTEXTO DEL PACIENTE\n{context_str}\n\n## MENSAJE DEL PACIENTE\n{message}"
 
         # Agregar historial si existe
@@ -439,34 +443,46 @@ class Orchestrator:
                 state,
                 retrieved_knowledge,
             )
-        elif intent == "scheduling":
-            # Si viene de triage, inyectar contexto del handoff
-            if previous_agent == "triage" and state.specialty_id:
-                if not es_uuid_valido(state.specialty_id):
-                    uuid_real = await self._resolver_slug(state.specialty_id, state.specialty_name)
-                    if uuid_real:
-                        state.specialty_id = uuid_real
-                    else:
-                        state.specialty_id = None
+        elif intent == "scheduling" or (
+            intent == "continue" and state.active_agent == "scheduling"
+        ):
+            # Normalizar cualquier estado antiguo antes de invocar el agente.
+            if state.specialty_id and not es_uuid_valido(state.specialty_id):
+                uuid_real = await self._resolver_slug(
+                    state.specialty_id, state.specialty_name, message
+                )
+                state.specialty_id = (
+                    uuid_real if uuid_real and es_uuid_valido(uuid_real) else None
+                )
+
+            if not state.specialty_id:
+                uuid_real = await self._resolver_slug("", None, message)
+                if uuid_real:
+                    state.specialty_id = uuid_real
+                    state.active_agent = "scheduling"
+                else:
+                    state.active_agent = "triage"
+                    respuesta_texto = (
+                        "Para ayudarte a agendar necesito conocer primero tus sintomas "
+                        "o la especialidad que necesitas."
+                    )
+                    if db is not None:
+                        self._persist_state(conversation_id, state, db)
+                    return respuesta_texto, state
 
             respuesta_texto = await self._process_scheduling(
                 conversation_id, message, history, usuario_id, state
             )
         else:
             # "continue" — mantener agente actual
-            if state.active_agent == "scheduling":
-                respuesta_texto = await self._process_scheduling(
-                    conversation_id, message, history, usuario_id, state
-                )
-            else:
-                respuesta_texto = await self._process_triage(
-                    conversation_id,
-                    message,
-                    history,
-                    usuario_id,
-                    state,
-                    retrieved_knowledge,
-                )
+            respuesta_texto = await self._process_triage(
+                conversation_id,
+                message,
+                history,
+                usuario_id,
+                state,
+                retrieved_knowledge,
+            )
 
         # 3. Persistir estado
         if db is not None:
@@ -475,10 +491,13 @@ class Orchestrator:
         return respuesta_texto, state
 
     async def _resolver_slug(
-        self, slug: str, specialty_name: str | None
+        self, slug: str, specialty_name: str | None, message: str | None = None
     ) -> str | None:
-        """Resuelve un slug de knowledge base a un UUID real del catalogo."""
-        from ..agents.tools import obtener_especialidades as _obtener_esp
+        """Resuelve una especialidad por UUID, nombre o slug sin usar el LLM."""
+        from ..agents.tools import (
+            _consultar_catalog_service_cached,
+            obtener_especialidades as _obtener_esp,
+        )
 
         if es_uuid_valido(slug):
             return slug
@@ -489,15 +508,70 @@ class Orchestrator:
             return None
 
         especialidades = result.get("especialidades", [])
+        servicios_result = _consultar_catalog_service_cached("/servicios")
+        servicios = servicios_result.get("data", []) if servicios_result.get("ok") else []
+        nombres_servicios = {
+            str(servicio.get("servicio_id")): str(servicio.get("nombre", ""))
+            for servicio in servicios
+        }
 
-        if specialty_name:
-            for esp in especialidades:
-                if esp.get("nombre", "").lower() == specialty_name.lower():
-                    return str(esp.get("especialidad_id", ""))
+        def _normalizar(value: str) -> str:
+            sin_tildes = unicodedata.normalize("NFKD", value)
+            sin_tildes = "".join(
+                char for char in sin_tildes if not unicodedata.combining(char)
+            )
+            return " ".join(sin_tildes.lower().replace("_", " ").split())
 
-        slug_normalized = slug.replace("_", " ").lower()
+        candidatos: list[dict[str, Any]] = []
+        consulta = _normalizar(message or "")
+        nombres_consultables = [
+            _normalizar(value)
+            for value in (specialty_name, slug.replace("_", " "))
+            if value
+        ]
         for esp in especialidades:
-            if slug_normalized in esp.get("nombre", "").lower():
-                return str(esp.get("especialidad_id", ""))
+            nombre = _normalizar(str(esp.get("nombre", "")))
+            if not nombre:
+                continue
+            nombre_sin_prefijo = nombre
+            for prefijo in ("consulta ", "servicio "):
+                if nombre_sin_prefijo.startswith(prefijo):
+                    nombre_sin_prefijo = nombre_sin_prefijo[len(prefijo):]
+                    break
+            nombres_catalogo = {
+                nombre,
+                nombre_sin_prefijo,
+                _normalizar(nombres_servicios.get(str(esp.get("servicio_id")), "")),
+            }
+            if any(
+                candidato in nombres_catalogo
+                or any(
+                    candidato and candidato in nombre_catalogo_item
+                    for nombre_catalogo_item in nombres_catalogo
+                )
+                for candidato in nombres_consultables
+            ) or (
+                consulta
+                and any(
+                    nombre_catalogo_item and nombre_catalogo_item in consulta
+                    for nombre_catalogo_item in nombres_catalogo
+                )
+            ):
+                candidatos.append(esp)
+
+        ids = {
+            str(esp.get("especialidad_id", ""))
+            for esp in candidatos
+            if es_uuid_valido(str(esp.get("especialidad_id", "")))
+        }
+        if len(ids) == 1:
+            return ids.pop()
+        if len(ids) > 1:
+            log_event(
+                "ORCH",
+                "SPECIALTY_RESOLVE",
+                "warning",
+                f"Especialidad ambigua para consulta={message or slug!r}: {len(ids)} coincidencias",
+            )
 
         return None

@@ -232,3 +232,11 @@ class SlotDisponibleDetallado(BaseModel):
 	especialidad_id: UUID
 	hora_inicio: str
 	hora_fin: str
+
+
+class ProximaDisponibilidadResponse(BaseModel):
+	"""Primera fecha disponible y sus opciones completas."""
+
+	fecha: date | None
+	opciones: list[SlotDisponibleDetallado]
+	dias_consultados: int

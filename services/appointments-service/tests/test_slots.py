@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date, datetime, time
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -108,3 +108,53 @@ def test_detailed_contract_excludes_occupied_slot(slot_context):
 		for slot in slots
 	)
 	assert any(slot["medico_id"] == str(medico_b) and slot["hora_inicio"] == "08:00" for slot in slots)
+
+
+def test_next_availability_skips_empty_days_and_returns_first_date(monkeypatch):
+	fecha_hoy = date(2026, 10, 30)
+	fecha_disponible = date(2026, 11, 2)
+	monkeypatch.setattr(crud, "hoy_bogota", lambda: fecha_hoy)
+
+	def fake_slots(_db, fecha, **_kwargs):
+		if fecha == fecha_disponible:
+			return [{
+				"medico_id": str(uuid4()),
+				"sede_id": str(uuid4()),
+				"especialidad_id": str(uuid4()),
+				"hora_inicio": "07:00",
+				"hora_fin": "07:20",
+			}] * 18
+		return []
+
+	monkeypatch.setattr(crud, "generar_slots_detallados", fake_slots)
+	result = crud.buscar_proxima_disponibilidad(
+		_FakeDb([]), especialidad_id=uuid4(), desde=fecha_hoy, dias=14, limite=5
+	)
+
+	assert result["fecha"] == fecha_disponible
+	assert len(result["opciones"]) == 5
+	assert result["dias_consultados"] == 4
+
+
+def test_next_availability_returns_empty_window(monkeypatch):
+	monkeypatch.setattr(crud, "hoy_bogota", lambda: date(2026, 10, 30))
+	monkeypatch.setattr(crud, "generar_slots_detallados", lambda *_args, **_kwargs: [])
+
+	result = crud.buscar_proxima_disponibilidad(
+		_FakeDb([]), especialidad_id=uuid4(), desde=date(2026, 10, 30), dias=14, limite=5
+	)
+
+	assert result["fecha"] is None
+	assert result["opciones"] == []
+	assert result["dias_consultados"] == 14
+
+
+def test_next_availability_does_not_offer_past_today_slots(slot_context, monkeypatch):
+	fecha, *_ = slot_context
+	monkeypatch.setattr(crud, "hoy_bogota", lambda: fecha)
+	monkeypatch.setattr(crud, "ahora_bogota", lambda: datetime(2030, 1, 7, 8, 30))
+	slots = crud.generar_slots_detallados(
+		_FakeDb([]), fecha=fecha, especialidad_id=slot_context[-1]
+	)
+
+	assert not any(slot["hora_inicio"] < "09:30" for slot in slots)
