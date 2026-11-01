@@ -217,7 +217,12 @@ Respuesta: `{ respuesta, conversacion_id, clasificacion }` (sin cambios).
 
 ### Tools del asistente (Strands @tool)
 Flujo: `obtener_especialidades()` → `obtener_medicos(especialidad_id)` → `obtener_sedes()` → `obtener_disponibilidad_citas(...)` → confirmar → `agendar_cita(...)`
-Gestión de citas: `consultar_citas_usuario(usuario_id)`, `reagendar_cita(...)`, `cancelar_cita(...)`
+Gestión de citas: `consultar_citas_usuario(usuario_id)`, `proponer_cancelacion(referencia)` y
+`proponer_reagendamiento(referencia, fecha, hora)`. Las dos últimas solo resuelven la
+referencia y guardan un `CancelDraft` o `RescheduleDraft` en `ConversationState`; la ejecución
+ocurre en el orquestador después de una confirmación determinista. Cancelar o reagendar nunca
+se ejecuta por mensajes como "de una vez". Ninguna tool devuelve `cita_id` ni `usuario_id` al
+LLM.
 
 **`agendar_cita` requiere 7 parámetros** (todos obligatorios):
 `usuario_id`, `especialidad_id`, `medico_id`, `tipo_servicio`, `fecha`, `hora`, `sede_id`.
