@@ -22,7 +22,7 @@ from strands.hooks.events import (
 from strands.hooks.registry import HookOrder
 
 from .conversation_state import ConversationState, classify_intent, es_uuid_valido
-from .conversation_state import BookingDraft
+from .conversation_state import BookingDraft, CancelDraft, RescheduleDraft
 from .logger import log_event
 from .turn_context import TurnContext
 from ..knowledge.retrieval import RetrievedKnowledge, retrieve_knowledge
@@ -73,17 +73,152 @@ def render_booking_summary(draft: BookingDraft) -> str:
     )
 
 
+MESES_SPANOL = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+# Mensajes deterministas (por codigo, nunca por LLM) de los flujos PR4.
+MENSAJES_NEGACION = {
+    "agendar": "Entendido, no agendaré esa cita.",
+    "cancelar": "Entendido, no cancelaré esa cita.",
+    "reagendar": "Entendido, no reagendaré esa cita.",
+}
+
+MENSAJES_CITA_CAMBIO = {
+    "cancelar": (
+        "Tu cita cambió: ya no está programada (pudo haberse cancelado o "
+        "reprogramado por otro medio). Pídeme de nuevo cancelar la cita que quieras."
+    ),
+    "reagendar": (
+        "Tu cita cambió desde que preparé el resumen (ya no está programada "
+        "o su horario cambió). Pídeme de nuevo el reagendamiento con la "
+        "referencia de la cita."
+    ),
+}
+
+MENSAJE_CUPO_NO_DISPONIBLE = (
+    "Ese horario ya no está disponible. Pídeme de nuevo un reagendamiento "
+    "y muestro otras opciones."
+)
+
+NOMBRE_ACCION = {"cancelar": "cancelación", "reagendar": "reprogramación"}
+
+
+def _fecha_larga(fecha_iso: str) -> str:
+    """'2026-11-02' -> 'lunes 2 de noviembre de 2026' (sin depender del LLM)."""
+    try:
+        fecha = datetime.strptime(str(fecha_iso), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return str(fecha_iso)
+    return f"{DIAS_SEMANA[fecha.weekday()]} {fecha.day} de {MESES_SPANOL[fecha.month - 1]} de {fecha.year}"
+
+
+def _fecha_resumen(fecha_iso: str) -> str:
+    """'2026-11-02' -> 'lunes 02/11/2026'; sin LLM y sin lanzar si es corrupta."""
+    try:
+        fecha = datetime.strptime(str(fecha_iso), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return str(fecha_iso)
+    return f"{DIAS_SEMANA[fecha.weekday()]} {fecha.strftime('%d/%m/%Y')}"
+
+
+def render_cancel_summary(draft: CancelDraft) -> str:
+    """Resumen oficial confirmable de una cancelacion (PR4, paso 6)."""
+    motivo = (draft.motivo or "").strip() or "Cancelación solicitada"
+    return (
+        "RESUMEN OFICIAL DE LA CANCELACIÓN\n"
+        "- Acción: CANCELAR\n"
+        f"- Fecha: {_fecha_resumen(draft.fecha)}\n"
+        f"- Hora: {draft.hora_inicio} - {draft.hora_fin}\n"
+        f"- Médico: {draft.medico_nombre}\n"
+        f"- Sede: {draft.sede_nombre}\n"
+        f"- Especialidad: {draft.especialidad_nombre}\n"
+        f"- Motivo: {motivo}\n\n"
+        "¿Confirmas? Responde sí o no."
+    )
+
+
+def render_reschedule_summary(draft: RescheduleDraft) -> str:
+    """Resumen oficial confirmable de un reagendamiento (PR4, paso 6)."""
+    return (
+        "RESUMEN OFICIAL DEL REAGENDAMIENTO\n"
+        "- Acción: REAGENDAR\n"
+        f"- Cita actual: {_fecha_resumen(draft.fecha_original)}, "
+        f"de {draft.hora_inicio_original} a {draft.hora_fin_original}\n"
+        f"- Nueva fecha: {_fecha_resumen(draft.nueva_fecha)}\n"
+        f"- Nueva hora: {draft.nueva_hora_inicio} - {draft.nueva_hora_fin}\n"
+        f"- Médico: {draft.medico_nombre}\n"
+        f"- Sede: {draft.sede_nombre}\n"
+        f"- Especialidad: {draft.especialidad_nombre}\n\n"
+        "¿Confirmas? Responde sí o no."
+    )
+
+
+def _resumen_de_accion(state: ConversationState) -> str | None:
+    """Resumen oficial del draft activo segun pending_action; None si no hay."""
+    if state.pending_action == "cancelar" and state.cancel_draft is not None:
+        return render_cancel_summary(state.cancel_draft)
+    if state.pending_action == "reagendar" and state.reschedule_draft is not None:
+        return render_reschedule_summary(state.reschedule_draft)
+    if state.pending_action == "agendar" and state.booking_draft is not None:
+        return render_booking_summary(state.booking_draft)
+    return None
+
+
+def _draft_activo(
+    state: ConversationState,
+) -> BookingDraft | CancelDraft | RescheduleDraft | None:
+    if state.pending_action == "cancelar":
+        return state.cancel_draft
+    if state.pending_action == "reagendar":
+        return state.reschedule_draft
+    return state.booking_draft
+
+
+def _limpiar_draft(state: ConversationState) -> None:
+    """Limpia el draft activo y toda la ventana de confirmacion."""
+    state.booking_draft = None
+    state.cancel_draft = None
+    state.reschedule_draft = None
+    state.pending_action = None
+    state.pending_confirmation = False
+    state.draft_shown_message_count = None
+    state.draft_expires_at = None
+
+
 def _success_message(draft: BookingDraft) -> str:
-    fecha = datetime.strptime(draft.fecha, "%Y-%m-%d").date()
-    meses = [
-        "enero", "febrero", "marzo", "abril", "mayo", "junio",
-        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
-    ]
     return (
         f"Tu cita de {draft.especialidad_nombre} quedó agendada para el "
-        f"{DIAS_SEMANA[fecha.weekday()]} {fecha.day} de {meses[fecha.month - 1]} "
-        f"de {fecha.year}, de {draft.hora_inicio} a {draft.hora_fin}, con "
-        f"{draft.medico_nombre}, en {draft.sede_nombre} ({draft.sede_direccion})."
+        f"{_fecha_larga(draft.fecha)}, de {draft.hora_inicio} a {draft.hora_fin}, "
+        f"con {draft.medico_nombre}, en {draft.sede_nombre} ({draft.sede_direccion})."
+    )
+
+
+def _success_cancel_message(draft: CancelDraft) -> str:
+    """Exito de cancelacion por codigo, sin UUID."""
+    return (
+        f"Tu cita de {draft.especialidad_nombre} del {_fecha_larga(draft.fecha)} "
+        f"a las {draft.hora_inicio}, con {draft.medico_nombre}, en "
+        f"{draft.sede_nombre}, fue cancelada."
+    )
+
+
+def _success_ya_cancelada_message(draft: CancelDraft) -> str:
+    """Exito idempotente: la cita ya estaba cancelada, sin UUID."""
+    return (
+        f"Tu cita de {draft.especialidad_nombre} del {_fecha_larga(draft.fecha)} "
+        f"a las {draft.hora_inicio} ya estaba cancelada; no hacía falta "
+        "cancelarla de nuevo."
+    )
+
+
+def _success_reschedule_message(draft: RescheduleDraft) -> str:
+    """Exito de reagendamiento por codigo, sin UUID."""
+    return (
+        f"Tu cita de {draft.especialidad_nombre} con {draft.medico_nombre} en "
+        f"{draft.sede_nombre} fue reprogramada para el {_fecha_larga(draft.nueva_fecha)}, "
+        f"de {draft.nueva_hora_inicio} a {draft.nueva_hora_fin}."
     )
 
 
@@ -116,6 +251,27 @@ def _is_unambiguous_negative(value: str) -> bool:
         "cancela la propuesta",
         "ya no",
     }
+
+
+def _menciona_autorizacion_apurada(value: str) -> bool:
+    """True si el usuario pide saltarse la confirmacion ("de una vez", etc.).
+
+    Solo se usa para CANCELAR/REAGENDAR: ahi nunca ejecuta, solo vuelve a
+    mostrar el resumen oficial. Para "agendar" esa decision la toma
+    _is_explicit_authorization.
+    """
+    normalized = _normalizar_confirmacion(value)
+    if "?" in value or normalized.startswith(("no la", "no quiero")):
+        return False
+    return any(
+        phrase in normalized
+        for phrase in {
+            "de una vez",
+            "sin esperar confirmacion",
+            "no esperes confirmacion",
+            "no esperes mi confirmacion",
+        }
+    )
 
 
 def _registrar_hook_provider(agent: Agent) -> None:
@@ -581,7 +737,7 @@ class Orchestrator:
                 f"provider_attempts={scheduling_metrics['provider_attempts']}"
             )
 
-            if state.booking_draft is not None:
+            if state.pending_action is not None:
                 respuesta = self._append_booking_summary(state, respuesta)
             elif (
                 state.last_options_message_count == state.message_count - 1
@@ -618,19 +774,35 @@ class Orchestrator:
             )
 
     def _append_booking_summary(self, state: ConversationState, response: str) -> str:
-        """Añade o reemplaza el bloque oficial y marca cuándo se mostró."""
-        if state.booking_draft is None:
+        """Añade o reemplaza el bloque oficial del draft activo y marca cuándo se mostró.
+
+        Dispatch por pending_action (PR4 paso 6): agendar, cancelar o
+        reagendar. Usa el marker generico "RESUMEN OFICIAL" para no duplicar
+        texto si ya hay un resumen (de cualquier tipo) en la respuesta.
+        """
+        summary = _resumen_de_accion(state)
+        if summary is None:
             return response
-        marker = "RESUMEN OFICIAL DE LA CITA"
-        base = response.split(marker, 1)[0].rstrip()
-        summary = render_booking_summary(state.booking_draft)
+        base = response.split("RESUMEN OFICIAL", 1)[0].rstrip()
         state.draft_shown_message_count = state.message_count
         state.draft_expires_at = (
             datetime.now(ZONA_BOGOTA) + BOOKING_DRAFT_TTL
         ).isoformat()
-        state.pending_action = "agendar"
         state.pending_confirmation = True
         return f"{base}\n\n{summary}" if base else summary
+
+    def _refrescar_ventana_draft(self, state: ConversationState) -> None:
+        """Vuelve a abrir la ventana de confirmacion (reintento tras fallo)."""
+        state.draft_shown_message_count = state.message_count
+        state.draft_expires_at = (
+            datetime.now(ZONA_BOGOTA) + BOOKING_DRAFT_TTL
+        ).isoformat()
+        state.pending_confirmation = True
+
+    def _remostrar_resumen(self, state: ConversationState) -> str:
+        """Re-muestra el resumen oficial del draft activo (sin ejecutar)."""
+        self._refrescar_ventana_draft(state)
+        return _resumen_de_accion(state) or ""
 
     def _draft_is_expired(self, state: ConversationState) -> bool:
         if not state.draft_expires_at:
@@ -642,7 +814,7 @@ class Orchestrator:
         return datetime.now(ZONA_BOGOTA) >= expires_at
 
     def _user_id_is_valid_for_draft(
-        self, usuario_id: str | None, draft: BookingDraft
+        self, usuario_id: str | None, draft: BookingDraft | CancelDraft | RescheduleDraft
     ) -> bool:
         try:
             current = UUID(str(usuario_id))
@@ -692,18 +864,11 @@ class Orchestrator:
                     message = _success_message(draft)
                     state.last_booking_id = result.get("cita_id") or "confirmed"
                     state.last_booking_summary = message
-                    state.booking_draft = None
-                    state.pending_action = None
-                    state.pending_confirmation = False
-                    state.draft_shown_message_count = None
-                    state.draft_expires_at = None
+                    _limpiar_draft(state)
                     log_event("ORCH", "BOOKING", "info", "execute: reserva exitosa")
                     return message
 
-                state.draft_shown_message_count = state.message_count
-                state.draft_expires_at = (
-                    datetime.now(ZONA_BOGOTA) + BOOKING_DRAFT_TTL
-                ).isoformat()
+                self._refrescar_ventana_draft(state)
                 log_event("ORCH", "BOOKING", "warning", "execute: servicio rechazo la reserva")
                 return "No pude completar la reserva. Tu propuesta sigue guardada; confirma de nuevo para reintentar."
             finally:
@@ -711,7 +876,152 @@ class Orchestrator:
                 if db is not None:
                     self._persist_state(conversation_id, state, db)
 
-    async def _handle_pending_booking(
+    @staticmethod
+    def _reverificar_cita_del_draft(
+        draft: CancelDraft | RescheduleDraft, usuario_id: str | None, action: str
+    ) -> dict[str, Any]:
+        """Reconsulta las citas ACTIVAS del usuario verificado antes de ejecutar.
+
+        Regla PR4 paso 7: nunca ejecutar cancelar/reagendar contra una cita
+        que cambio o fue cancelada por otro canal entre la propuesta y el "si".
+
+        Returns:
+            {"ok": True} si la cita sigue programada (y al reagendar, con la
+            fecha/hora ORIGINALES del draft);
+            {"ok": False, "cita_cambio": True} si cambio/cancelo por otro canal;
+            {"ok": False, "error": ...} si la consulta fallo (transitorio: el
+            draft se conserva para reintentar).
+        """
+        from ..agents.tools import _obtener_citas_activas
+
+        resultado = _obtener_citas_activas(usuario_id or "")
+        if not resultado.get("ok"):
+            return {
+                "ok": False,
+                "error": resultado.get("error") or "No pude consultar tus citas.",
+            }
+        cita_id = str(draft.cita_id)
+        for cita in resultado.get("citas", []):
+            if not isinstance(cita, dict) or str(cita.get("cita_id")) != cita_id:
+                continue
+            if action == "reagendar":
+                fecha_actual = str(cita.get("fecha_cita", ""))[:10]
+                hora_actual = str(cita.get("hora_inicio", ""))[:5]
+                if (
+                    fecha_actual != str(draft.fecha_original)[:10]
+                    or hora_actual != str(draft.hora_inicio_original)[:5]
+                ):
+                    return {"ok": False, "cita_cambio": True}
+            return {"ok": True}
+        # No figura entre las programadas: la cancelaron o reprogramaron por
+        # otro medio (o la cita dejo de existir).
+        return {"ok": False, "cita_cambio": True}
+
+    async def _ejecutar_cancelar_reagendar(
+        self,
+        conversation_id: str,
+        state: ConversationState,
+        usuario_id: str | None,
+        db: Session | None,
+        action: str,
+    ) -> str | None:
+        """Ejecuta cancelar/reagendar tras el 'si' determinista (PR4 paso 7)."""
+        draft: CancelDraft | RescheduleDraft | None = (
+            state.cancel_draft if action == "cancelar" else state.reschedule_draft
+        )
+        if draft is None:
+            return None
+
+        lock = _booking_lock(conversation_id)
+        async with lock:
+            if state.last_booking_id and state.last_booking_summary:
+                log_event("ORCH", "BOOKING", "info", f"{action}: confirmacion repetida")
+                return state.last_booking_summary
+            if state.execution_started_at:
+                try:
+                    started = datetime.fromisoformat(state.execution_started_at)
+                    if datetime.now(ZONA_BOGOTA) - started < BOOKING_EXECUTION_TIMEOUT:
+                        log_event("ORCH", "BOOKING", "warning", f"{action}: rejected: execution en curso")
+                        return "La operación ya está siendo procesada. Por favor espera un momento."
+                except ValueError:
+                    pass
+
+            state.execution_started_at = datetime.now(ZONA_BOGOTA).isoformat()
+            if db is not None:
+                self._persist_state(conversation_id, state, db)
+
+            try:
+                verificacion = await asyncio.to_thread(
+                    self._reverificar_cita_del_draft, draft, usuario_id, action
+                )
+                if verificacion.get("cita_cambio"):
+                    _limpiar_draft(state)
+                    log_event("ORCH", "BOOKING", "info", f"{action}: rejected: la cita cambio")
+                    return MENSAJES_CITA_CAMBIO[action]
+                if not verificacion.get("ok"):
+                    # Fallo transitorio de la consulta: draft intacto, reintentable.
+                    self._refrescar_ventana_draft(state)
+                    log_event(
+                        "ORCH", "BOOKING", "warning",
+                        f"{action}: verificacion fallo: {verificacion.get('error')}",
+                    )
+                    return (
+                        "No pude verificar tu cita ahora mismo. Tu propuesta sigue "
+                        "guardada; confirma de nuevo para reintentar."
+                    )
+
+                from ..agents.tools import (
+                    ejecutar_cancelacion_desde_draft,
+                    ejecutar_reagendamiento_desde_draft,
+                )
+
+                executor = (
+                    ejecutar_cancelacion_desde_draft
+                    if action == "cancelar"
+                    else ejecutar_reagendamiento_desde_draft
+                )
+                result = await asyncio.to_thread(executor, draft, usuario_id or "")
+                if result.get("ok"):
+                    if action == "cancelar":
+                        message = (
+                            _success_ya_cancelada_message(draft)
+                            if result.get("ya_cancelada")
+                            else _success_cancel_message(draft)
+                        )
+                    else:
+                        message = _success_reschedule_message(draft)
+                    state.last_booking_id = draft.cita_id
+                    state.last_booking_summary = message
+                    _limpiar_draft(state)
+                    log_event("ORCH", "BOOKING", "info", f"{action}: ejecucion exitosa")
+                    return message
+                if result.get("cupo_no_disponible"):
+                    _limpiar_draft(state)
+                    log_event("ORCH", "BOOKING", "info", f"{action}: cupo ya no disponible")
+                    return MENSAJE_CUPO_NO_DISPONIBLE
+                if result.get("cita_cambio"):
+                    _limpiar_draft(state)
+                    log_event("ORCH", "BOOKING", "info", f"{action}: la cambio en la ejecucion")
+                    return MENSAJES_CITA_CAMBIO[action]
+
+                # Fallo transitorio (ok False sin banderas): conservar el draft
+                # y refrescar la ventana para que el "si" siguiente reintente.
+                self._refrescar_ventana_draft(state)
+                log_event(
+                    "ORCH", "BOOKING", "warning",
+                    f"{action}: fallo transitorio: {result.get('error')}",
+                )
+                return (
+                    f"No pude completar la {NOMBRE_ACCION[action]}. Tu propuesta "
+                    "sigue guardada; confirma de nuevo para reintentar o pídeme "
+                    "otra hora."
+                )
+            finally:
+                state.execution_started_at = None
+                if db is not None:
+                    self._persist_state(conversation_id, state, db)
+
+    async def _handle_pending_action(
         self,
         conversation_id: str,
         message: str,
@@ -719,7 +1029,12 @@ class Orchestrator:
         state: ConversationState,
         db: Session | None,
     ) -> str | None:
-        """Resuelve confirmaciones antes de clasificar intención."""
+        """Resuelve confirmaciones (agendar/cancelar/reagendar) antes de clasificar.
+
+        Solo "_is_affirmative" ejecuta. "_is_explicit_authorization" ejecuta
+        SOLO para "agendar"; en cancelar/reagendar ("de una vez", "no esperes
+        confirmacion") nunca ejecuta: se vuelve a mostrar el resumen oficial.
+        """
         if (
             state.last_booking_id or state.last_booking_summary
         ) and not _is_affirmative(message):
@@ -730,24 +1045,50 @@ class Orchestrator:
                 log_event("ORCH", "BOOKING", "info", "execute: confirmacion repetida tras exito")
                 return state.last_booking_summary
             return None
-        if state.pending_action != "agendar" or state.booking_draft is None:
+        action = state.pending_action
+        draft = _draft_activo(state)
+        if action is None or draft is None:
             return None
         if _is_unambiguous_negative(message):
-            state.booking_draft = None
-            state.pending_action = None
-            state.pending_confirmation = False
-            state.draft_shown_message_count = None
-            state.draft_expires_at = None
+            _limpiar_draft(state)
             log_event("ORCH", "BOOKING", "info", "rejected: negacion del usuario")
-            return "Entendido, no agendaré esa cita."
+            return MENSAJES_NEGACION[action]
         if self._draft_is_expired(state):
             log_event("ORCH", "BOOKING", "warning", "expired: draft fuera de TTL")
-            state.booking_draft = None
-            state.pending_action = None
-            state.pending_confirmation = False
-            state.draft_shown_message_count = None
-            state.draft_expires_at = None
+            _limpiar_draft(state)
             return None
+
+        if action in ("cancelar", "reagendar"):
+            cita_id = str(getattr(draft, "cita_id", "") or "").strip()
+            if not cita_id or not self._user_id_is_valid_for_draft(usuario_id, draft):
+                # Draft corrupto (cita_id vacio) o de OTRO usuario: nunca se
+                # ejecuta y se limpia.
+                log_event(
+                    "ORCH", "BOOKING", "warning",
+                    f"rejected: {action} con cita_id vacio o usuario distinto",
+                )
+                _limpiar_draft(state)
+                return None
+            if state.draft_shown_message_count != state.message_count - 1:
+                log_event("ORCH", "BOOKING", "info", "stale: resumen no corresponde al turno anterior")
+                return None
+            if not _is_affirmative(message):
+                if _menciona_autorizacion_apurada(message):
+                    # Cancelar/reagendar NUNCA se ejecutan por autorizacion
+                    # apurada: solo se vuelve a mostrar el resumen oficial.
+                    log_event(
+                        "ORCH", "BOOKING", "info",
+                        f"re-show: autorizacion apurada no ejecuta en {action}",
+                    )
+                    return self._remostrar_resumen(state)
+                log_event("ORCH", "BOOKING", "info", "ambiguous: pasa al agente con draft intacto")
+                return None
+            log_event("ORCH", "BOOKING", "info", f"execute: confirmacion determinista ({action})")
+            return await self._ejecutar_cancelar_reagendar(
+                conversation_id, state, usuario_id, db, action
+            )
+
+        # action == "agendar" (comportamiento pre-PR4, sin cambios).
         if state.draft_shown_message_count != state.message_count - 1:
             log_event("ORCH", "BOOKING", "info", "stale: resumen no corresponde al turno anterior")
             return None
@@ -792,7 +1133,7 @@ class Orchestrator:
             f"agent_actual={state.active_agent}"
         )
 
-        pending_response = await self._handle_pending_booking(
+        pending_response = await self._handle_pending_action(
             conversation_id, message, usuario_id, state, db
         )
         if pending_response is not None:
