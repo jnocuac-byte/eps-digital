@@ -256,7 +256,9 @@ def login(
 			rol=credencial.rol,
 		)
 
-	access_token, refresh_token = generar_tokens_para_credencial(credencial_id)
+	access_token, refresh_token = generar_tokens_para_credencial(
+		credencial_id, credencial.usuario_id
+	)
 	log_event("AUTH", "LOGIN", "info", f"Login exitoso: credencial_id={credencial_id}, rol={credencial.rol}")
 	return LoginResponse(
 		access_token=access_token,
@@ -355,7 +357,9 @@ def login_documento(
 			rol=credencial.rol,
 		)
 
-	access_token, refresh_token = generar_tokens_para_credencial(credencial_id)
+	access_token, refresh_token = generar_tokens_para_credencial(
+		credencial_id, credencial.usuario_id
+	)
 	log_event("AUTH", "LOGIN_DOC", "info", f"Login por documento exitoso: credencial_id={credencial_id}")
 	return LoginResponse(
 		access_token=access_token,
@@ -460,7 +464,9 @@ def verify_2fa(
 		log_event("AUTH", "VERIFY_2FA", "error", f"Credencial no encontrada: {payload.credencial_id}")
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credencial no encontrada")
 
-	access_token, refresh_token = generar_tokens_para_credencial(payload.credencial_id)
+	access_token, refresh_token = generar_tokens_para_credencial(
+		payload.credencial_id, credencial.usuario_id
+	)
 	log_event("AUTH", "VERIFY_2FA", "info", f"2FA verificado, tokens generados para credencial_id={payload.credencial_id}")
 	return {
 		"access_token": access_token,

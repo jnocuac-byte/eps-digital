@@ -26,6 +26,9 @@ from app.crud import (
 	get_metricas_citas,
 	get_metricas_medico,
 	get_recordatorios_pendientes,
+	buscar_proxima_disponibilidad,
+	generar_slots_detallados,
+	hoy_bogota,
 	reprogramar_cita,
 	update_cita,
 )
@@ -44,6 +47,8 @@ from app.schemas import (
 	RecordatorioResponse,
 	ReprogramarCitaRequest,
 	SlotDisponible,
+	SlotDisponibleDetallado,
+	ProximaDisponibilidadResponse,
 )
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -235,6 +240,67 @@ def listar_slots_disponibles(
 	return [SlotDisponible(**slot) for slot in slots]
 
 
+@app.get(
+	"/citas/slots-detallados",
+	response_model=list[SlotDisponibleDetallado],
+	tags=["citas"],
+)
+def listar_slots_detallados(
+	fecha: date = Query(...),
+	medico_id: UUID | None = Query(default=None),
+	servicio_id: UUID | None = Query(default=None),
+	especialidad_id: UUID | None = Query(default=None),
+	db: Session = Depends(get_db),
+) -> list[SlotDisponibleDetallado]:
+	"""Opciones disponibles con la combinacion exacta de medico, sede y horario."""
+	log_event(
+		"CITAS",
+		"SLOTS_DETAIL",
+		"info",
+		f"Consultar slots detallados fecha={fecha}, medico={medico_id}, especialidad={especialidad_id}",
+	)
+	try:
+		slots = generar_slots_detallados(
+			db,
+			fecha=fecha,
+			medico_id=medico_id,
+			servicio_id=servicio_id,
+			especialidad_id=especialidad_id,
+		)
+	except ValueError as exc:
+		log_event("CITAS", "SLOTS_DETAIL", "warning", f"Error consultando slots detallados: {exc}")
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+	log_event("CITAS", "SLOTS_DETAIL", "info", f"Slots detallados disponibles: {len(slots)}")
+	return [SlotDisponibleDetallado(**slot) for slot in slots]
+
+
+@app.get(
+	"/citas/proxima-disponibilidad",
+	response_model=ProximaDisponibilidadResponse,
+	tags=["citas"],
+)
+def listar_proxima_disponibilidad(
+	especialidad_id: UUID = Query(...),
+	desde: date | None = Query(default=None),
+	dias: int = Query(default=14, ge=1, le=14),
+	limite: int = Query(default=5, ge=1, le=20),
+	db: Session = Depends(get_db),
+) -> ProximaDisponibilidadResponse:
+	"""Busca la primera fecha con cupos completos para una especialidad."""
+	fecha_inicio = desde or hoy_bogota()
+	try:
+		resultado = buscar_proxima_disponibilidad(
+			db,
+			especialidad_id=especialidad_id,
+			desde=fecha_inicio,
+			dias=dias,
+			limite=limite,
+		)
+	except ValueError as exc:
+		raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+	return ProximaDisponibilidadResponse(**resultado)
+
+
 @app.get("/citas/metricas", tags=["admin"])
 def obtener_metricas(
 	dias: int = Query(default=7, ge=1, le=90),
@@ -289,7 +355,7 @@ def actualizar_cita(
 def cancelar_cita_endpoint(
 	cita_id: UUID,
 	payload: CancelarCitaRequest,
-	x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+	x_user_id: str = Header(alias="X-User-ID"),
 	db: Session = Depends(get_db),
 ) -> CitaResponse:
 	"""Cancela una cita si cumple reglas de negocio."""
@@ -337,7 +403,7 @@ def cambiar_estado_cita_endpoint(
 def reprogramar_cita_endpoint(
 	cita_id: UUID,
 	payload: ReprogramarCitaRequest,
-	x_user_id: str | None = Header(default=None, alias="X-User-ID"),
+	x_user_id: str = Header(alias="X-User-ID"),
 	db: Session = Depends(get_db),
 ) -> CitaResponse:
 	"""Reprograma una cita validando disponibilidad."""

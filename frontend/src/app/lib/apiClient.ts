@@ -26,6 +26,45 @@ const DIRECT_URLS = {
 
 const BASE_URLS = isGateway ? GATEWAY_URLS : DIRECT_URLS;
 
+const refreshClient = axios.create({
+  baseURL: BASE_URLS.auth,
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 15000,
+});
+
+let refreshPromise: Promise<string> | null = null;
+
+async function refreshAccessToken(): Promise<string> {
+  const { refreshToken, token, userId, login, logout } = useAuthStore.getState();
+  if (!refreshToken || !token) {
+    throw new Error('No hay refresh token disponible');
+  }
+
+  if (!refreshPromise) {
+    refreshPromise = refreshClient
+      .post('/auth/refresh', { refresh_token: refreshToken })
+      .then((response) => {
+        const newToken = response.data.access_token as string;
+        if (!newToken) {
+          throw new Error('El refresh no devolvió access token');
+        }
+        login(newToken, response.data.refresh_token || refreshToken, userId || '');
+        return newToken;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  try {
+    return await refreshPromise;
+  } catch (error) {
+    logout();
+    window.location.href = '/login';
+    throw error;
+  }
+}
+
 function createClient(baseURL: string, requiresAuth = false, timeoutMs = 15000) {
   const client = axios.create({
     baseURL,
@@ -48,11 +87,24 @@ function createClient(baseURL: string, requiresAuth = false, timeoutMs = 15000) 
 
     client.interceptors.response.use(
       (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          useAuthStore.getState().logout();
-          window.location.href = '/login';
+      async (error) => {
+        const config = error.config as (typeof error.config & {
+          _authRefreshAttempted?: boolean;
+        }) | undefined;
+        const isRefreshRequest = config?.url?.includes('/auth/refresh');
+
+        if (error.response?.status === 401 && config && !config._authRefreshAttempted && !isRefreshRequest) {
+          config._authRefreshAttempted = true;
+          try {
+            const newToken = await refreshAccessToken();
+            config.headers = config.headers || {};
+            config.headers.Authorization = `Bearer ${newToken}`;
+            return client.request(config);
+          } catch {
+            return Promise.reject(error);
+          }
         }
+
         return Promise.reject(error);
       }
     );

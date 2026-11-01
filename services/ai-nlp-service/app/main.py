@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from .core import Orchestrator
+from .core.auth import verify_access_token
 from .core.logger import log_event, setup_logger
 from .core.error_handler import register_exception_handlers
 from .core.security_headers import register_security_headers
@@ -61,17 +62,29 @@ async def lifespan(app: FastAPI):
     scheduling_model = None
     try:
         triage_model = build_fallback_model(
-            order=["gemini-1", "gemini-2", "gemini-3", "groq", "cerebras", "mistral"],
+            order=["gemini", "groq", "cerebras", "mistral"],
         )
-        log_event("MAIN", "INIT", "info", "Triage ModelRouter: Gemini-1 → Gemini-2 → Gemini-3 → Groq → Cerebras → Mistral")
+        log_event(
+            "MAIN",
+            "INIT",
+            "info",
+            f"Triage ModelRouter: {len(triage_model.candidates)} providers "
+            f"({', '.join(candidate.name for candidate in triage_model.candidates)})",
+        )
     except ValueError as exc:
         log_event("MAIN", "INIT", "warning", f"Triage ModelRouter no disponible: {exc}")
 
     try:
         scheduling_model = build_fallback_model(
-            order=["gemini-1", "gemini-2", "gemini-3", "cerebras", "mistral"],
+            order=["gemini-lite", "groq", "gemini"],
         )
-        log_event("MAIN", "INIT", "info", "Scheduling ModelRouter: Gemini-1 → Gemini-2 → Gemini-3 → Cerebras → Mistral")
+        log_event(
+            "MAIN",
+            "INIT",
+            "info",
+            f"Scheduling ModelRouter: {len(scheduling_model.candidates)} providers "
+            f"({', '.join(candidate.name for candidate in scheduling_model.candidates)})",
+        )
     except ValueError as exc:
         log_event("MAIN", "INIT", "warning", f"Scheduling ModelRouter no disponible: {exc}")
 
@@ -165,7 +178,11 @@ def _mapear_historial_a_mensajes_llm(mensajes_db: list[Any]) -> list[dict[str, s
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])
-async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
+async def post_chat(
+    payload: ChatRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ChatResponse:
     """Gestiona el flujo conversacional con orquestador multi-agente Strands."""
     t0 = time.time()
     log_event(
@@ -174,29 +191,48 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
         f"conv={payload.conversacion_id or 'nueva'}"
     )
 
-    orchestrator = getattr(app.state, "orchestrator", None)
-    if orchestrator is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Orquestador no disponible. Verifica GROQ_API_KEY o GEMINI_API_KEY.",
-        )
-
     try:
-        # 1. Gestionar conversacion
-        if payload.conversacion_id is None:
-            usuario_id = payload.usuario_id or UUID(
-                "00000000-0000-0000-0000-000000000000"
+        # 1. La identidad solo proviene del access token.
+        usuario_id_uuid = verify_access_token(request.headers.get("Authorization"))
+        usuario_id = str(usuario_id_uuid)
+        if payload.usuario_id is not None and payload.usuario_id != usuario_id_uuid:
+            log_event(
+                "MAIN",
+                "AUTH",
+                "warning",
+                "Se ignoró usuario_id del body porque no coincide con el token",
             )
-            conversacion = crear_conversacion(db, usuario_id=usuario_id)
+
+        orchestrator = getattr(app.state, "orchestrator", None)
+        if orchestrator is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Orquestador no disponible. Verifica GROQ_API_KEY o GEMINI_API_KEY.",
+            )
+
+        # 2. Gestionar conversacion
+        if payload.conversacion_id is None:
+            conversacion = crear_conversacion(db, usuario_id=usuario_id_uuid)
             log_event("MAIN", "CONV", "info", f"Nueva conversacion: {conversacion.conversacion_id}")
         else:
             conversacion = get_conversacion(db, payload.conversacion_id)
             if conversacion is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conversacion no encontrada",
+                log_event(
+                    "MAIN",
+                    "AUTH",
+                    "warning",
+                    f"Conversacion inexistente {payload.conversacion_id}; se crea una nueva",
                 )
-            if conversacion.estado == "cerrada":
+                conversacion = crear_conversacion(db, usuario_id=usuario_id_uuid)
+            elif conversacion.usuario_id != usuario_id_uuid:
+                log_event(
+                    "MAIN",
+                    "AUTH",
+                    "warning",
+                    f"Conversacion ajena {payload.conversacion_id}; se crea una nueva",
+                )
+                conversacion = crear_conversacion(db, usuario_id=usuario_id_uuid)
+            elif conversacion.estado == "cerrada":
                 log_event("MAIN", "CONV", "warning", f"Conversacion cerrada: {payload.conversacion_id}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -222,12 +258,11 @@ async def post_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> Chat
         history = _mapear_historial_a_mensajes_llm(historial_db)
 
         # 4. Procesar con el orquestador Strands
-        usuario_id_str = str(payload.usuario_id) if payload.usuario_id else None
         respuesta_texto, state = await orchestrator.process(
             conversation_id=str(conversacion.conversacion_id),
             message=payload.mensaje,
             history=history,
-            usuario_id=usuario_id_str,
+            usuario_id=usuario_id,
             db=db,
         )
 

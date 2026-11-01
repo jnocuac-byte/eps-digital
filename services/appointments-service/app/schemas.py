@@ -222,3 +222,21 @@ class SlotDisponible(BaseModel):
 
 	hora_inicio: str
 	hora_fin: str
+
+
+class SlotDisponibleDetallado(BaseModel):
+	"""Opcion disponible conservando medico, sede y especialidad."""
+
+	medico_id: UUID
+	sede_id: UUID
+	especialidad_id: UUID
+	hora_inicio: str
+	hora_fin: str
+
+
+class ProximaDisponibilidadResponse(BaseModel):
+	"""Primera fecha disponible y sus opciones completas."""
+
+	fecha: date | None
+	opciones: list[SlotDisponibleDetallado]
+	dias_consultados: int
