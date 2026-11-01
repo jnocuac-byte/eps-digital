@@ -87,6 +87,7 @@ def _sha256_hex(value: str) -> str:
 # 3. Funciones de JWT (crear y verificar)
 def create_jwt_token(
 	credencial_id: uuid.UUID,
+	usuario_id: uuid.UUID,
 	tipo: str,
 	expires_delta: timedelta,
 ) -> str:
@@ -94,6 +95,7 @@ def create_jwt_token(
 	now = datetime.now(UTC)
 	payload = {
 		"sub": str(credencial_id),
+		"usuario_id": str(usuario_id),
 		"iat": int(now.timestamp()),
 		"exp": int((now + expires_delta).timestamp()),
 		"tipo": tipo,
@@ -102,19 +104,21 @@ def create_jwt_token(
 	return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
 
 
-def create_access_token(credencial_id: uuid.UUID) -> str:
+def create_access_token(credencial_id: uuid.UUID, usuario_id: uuid.UUID) -> str:
 	"""Crea access token con expiracion de 30 minutos."""
 	return create_jwt_token(
 		credencial_id=credencial_id,
+		usuario_id=usuario_id,
 		tipo="access",
 		expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
 	)
 
 
-def create_refresh_token(credencial_id: uuid.UUID) -> str:
+def create_refresh_token(credencial_id: uuid.UUID, usuario_id: uuid.UUID) -> str:
 	"""Crea refresh token con expiracion de 7 dias."""
 	return create_jwt_token(
 		credencial_id=credencial_id,
+		usuario_id=usuario_id,
 		tipo="refresh",
 		expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
 	)
@@ -152,7 +156,7 @@ def refresh_access_token(db: Session, refresh_token: str) -> str:
     credencial = get_credencial_by_id(db, credencial_id)
     if not credencial or not credencial.activo:
         raise ValueError("Credencial invalida o inactiva")
-    return create_access_token(credencial_id)
+    return create_access_token(credencial_id, credencial.usuario_id)
 
 
 # 7. Funciones auxiliares
@@ -430,10 +434,13 @@ def autenticar_usuario(
 	return credencial.credencial_id, credencial.tiene_2fa
 
 
-def generar_tokens_para_credencial(credencial_id: uuid.UUID) -> tuple[str, str]:
+def generar_tokens_para_credencial(
+	credencial_id: uuid.UUID,
+	usuario_id: uuid.UUID,
+) -> tuple[str, str]:
 	"""Genera par de tokens (access, refresh) para una credencial."""
-	access_token = create_access_token(credencial_id)
-	refresh_token = create_refresh_token(credencial_id)
+	access_token = create_access_token(credencial_id, usuario_id)
+	refresh_token = create_refresh_token(credencial_id, usuario_id)
 	return access_token, refresh_token
 
 

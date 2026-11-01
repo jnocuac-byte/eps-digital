@@ -36,7 +36,7 @@ credencial_id, tiene_2fa = autenticar_usuario(db, registro.correo, "ClaveSegura1
 print(f"✅ Autenticado: {credencial_id}, 2FA: {tiene_2fa}")
 
 # 3. Generar tokens
-access, refresh = generar_tokens_para_credencial(credencial_id)
+access, refresh = generar_tokens_para_credencial(credencial_id, credencial.usuario_id)
 print(f"✅ Access token: {access[:50]}...")
 print(f"✅ Refresh token: {refresh[:50]}...")
 

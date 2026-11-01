@@ -63,7 +63,7 @@ export default function AsistentePage() {
       const res = await aiApi.chat(text.trim(), conversacionId, userId || undefined);
       const { respuesta, conversacion_id, clasificacion } = res.data;
 
-      if (conversacion_id && !conversacionId) {
+      if (conversacion_id) {
         setConversacionId(conversacion_id);
       }
 

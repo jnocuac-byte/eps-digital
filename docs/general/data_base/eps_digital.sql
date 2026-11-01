@@ -71,12 +71,14 @@ CREATE TABLE public.usuarios (
   nombres character varying NOT NULL,
   apellidos character varying NOT NULL,
   tipo_documento character varying NOT NULL,
-  numero_documento character varying NOT NULL UNIQUE,
+  numero_documento text NOT NULL,
   fecha_nacimiento date NOT NULL,
   telefono character varying,
-  correo character varying NOT NULL UNIQUE,
+  correo text NOT NULL,
   creado_en timestamp without time zone NOT NULL,
   actualizado_en timestamp without time zone NOT NULL,
+  numero_documento_hash character varying NOT NULL UNIQUE,
+  correo_hash character varying NOT NULL UNIQUE,
   CONSTRAINT usuarios_pkey PRIMARY KEY (usuario_id)
 );
 CREATE TABLE public.afiliaciones (
@@ -95,7 +97,7 @@ CREATE TABLE public.afiliaciones (
 CREATE TABLE public.informacion_medica (
   info_medica_id uuid NOT NULL DEFAULT gen_random_uuid(),
   usuario_id uuid NOT NULL UNIQUE,
-  tipo_sangre character varying,
+  tipo_sangre text,
   alergias text,
   enfermedades_cronicas text,
   medicamentos_actuales text,
@@ -254,5 +256,6 @@ CREATE TABLE public.knowledge_chunks (
   contenido text NOT NULL,
   embedding USER-DEFINED NOT NULL,
   creado_en timestamp with time zone NOT NULL,
+  source_key character varying NOT NULL UNIQUE,
   CONSTRAINT knowledge_chunks_pkey PRIMARY KEY (chunk_id)
 );

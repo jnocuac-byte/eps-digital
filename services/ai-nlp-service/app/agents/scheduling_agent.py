@@ -9,8 +9,8 @@ from .tools import SCHEDULING_TOOLS
 def build_scheduling_agent(model: object) -> Agent:
     """Construye el agente de agendamiento con tools nativas.
 
-    El agente ejecuta automáticamente las tools en secuencia:
-    obtener_especialidades → obtener_medicos → agendar_cita.
+    El agente ejecuta automáticamente las tools necesarias para el flujo,
+    comenzando con un specialty_id UUID entregado por el orquestador.
     Strands maneja el loop de tool calling internamente.
 
     Args:
